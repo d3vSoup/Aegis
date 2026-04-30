@@ -25,7 +25,7 @@ import {
   fireAlertNotification,
   dismissAlertNotifications,
 } from '../utils/NotificationService';
-import { playAlertBurst } from '../utils/HapticsEngine';
+import { playAlertBurst, playCriticalSlam, playPatternOnce } from '../utils/HapticsEngine';
 import {
   startBackgroundService,
   stopBackgroundService,
@@ -232,6 +232,12 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
       startInference((result) => {
         const event = createMockAlert(result.type, state.eventPatternMap, state.userName);
         const enrichedEvent = { ...event, decibels: result.decibels };
+
+        // Fire the maximum-intensity haptic slam + pattern immediately
+        // so the physical alert lands before the React state even updates.
+        playCriticalSlam();
+        playPatternOnce(enrichedEvent.hapticPattern);
+
         dispatch({ type: 'TRIGGER_ALERT', payload: enrichedEvent });
       }, state.sensitivity);
 

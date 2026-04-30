@@ -9,8 +9,9 @@ import Animated, {
 import { Colors } from '../constants/Colors';
 import { TopAppBar } from '../components/TopAppBar';
 import { AegisBall } from '../components/AegisBall';
+import { TingAlert } from '../components/TingAlert';
 import { useAlert } from '../context/AlertContext';
-import { playMechanicalClick, playPatternOnce, stopPattern } from '../utils/HapticsEngine';
+import { playMechanicalClick, playPatternOnce, playCriticalSlam, stopPattern } from '../utils/HapticsEngine';
 import { createMockAlert, getRandomAlertType } from '../utils/AlertManager';
 
 const AnimatedView = Animated.createAnimatedComponent(View);
@@ -82,6 +83,7 @@ export default function Home() {
           const type = demoTypes.current[demoIndex.current % demoTypes.current.length];
           const event = createMockAlert(type, eventPatternMap, userName);
           triggerAlert(event);
+          playCriticalSlam();          // Max haptic slam on every demo event
           playPatternOnce(event.hapticPattern);
           demoIndex.current += 1;
         };
@@ -148,22 +150,43 @@ export default function Home() {
     ),
   }));
 
+  // ─── Ting Alert Visibility ─────────────────────────────────────────────
+  // Tracks whether the Ting overlay should be shown. Separate from
+  // isAlertActive so the user can dismiss the popup without stopping
+  // the underlying alert state (the Aegis Ball stays in alert mode).
+  const [tingVisible, setTingVisible] = useState(false);
+
+  // Show the Ting popup the moment a new alert fires
+  useEffect(() => {
+    if (isAlertActive && currentAlert) {
+      setTingVisible(true);
+    }
+  }, [currentAlert?.id]); // keyed on ID so re-fires for each unique alert
+
   // ─── Test Alert Handler ───────────────────────────────────────────
   const handleTestAlert = () => {
     if (!safetyMode) return;
     const alertType = getRandomAlertType();
     const event = createMockAlert(alertType, eventPatternMap, userName);
     triggerAlert(event);
+    playCriticalSlam();            // Max haptic slam
     playPatternOnce(event.hapticPattern);
   };
 
   const handleDismiss = () => {
+    setTingVisible(false);         // Close the Ting overlay first
     stopPattern();
     dismissAlert();
     if (isDemoMode) {
       if (demoTimer.current) clearInterval(demoTimer.current);
       setIsDemoMode(false);
     }
+  };
+
+  const handleTingDismiss = () => {
+    // Dismissing the popup alone does NOT stop the underlying alert state.
+    // The Aegis Ball and audio inference continue. Only the popup closes.
+    setTingVisible(false);
   };
 
   // ─── Status Text ──────────────────────────────────────────────────
@@ -309,6 +332,12 @@ export default function Home() {
           {isAlertActive ? 'ALERT IN PROGRESS' : safetyMode ? 'SYSTEM SENTINEL ACTIVE' : isDemoMode ? 'SIMULATION ACTIVE' : 'SENTINEL OFFLINE'}
         </Text>
       </View>
+      {/* ─── Ting Alert: Highest-Priority Notification Overlay ─── */}
+      <TingAlert
+        visible={tingVisible}
+        alert={currentAlert}
+        onDismiss={handleTingDismiss}
+      />
     </View>
   );
 }

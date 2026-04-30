@@ -8,40 +8,42 @@ interface HapticStep {
 }
 
 // ─── Pattern Definitions ─────────────────────────────────────────────
+// All patterns are tuned to MAXIMUM intensity. Rigid is the hardest
+// impact style available. The goal is unmistakable physical communication.
 const PATTERNS: Record<HapticPattern, HapticStep[]> = {
   staccato: [
-    // Short, sharp bursts — rapid-fire Rigid hits (tightest gap = strongest feel)
-    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 0 },
-    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 40 },
-    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 40 },
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 200 },
-    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 40 },
-    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 40 },
-    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 40 },
+    // MAX INTENSITY: Rapid-fire triple salvo — double-burst with a hard rest
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 0   },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 60  },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 60  },
+    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 250 },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 60  },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 60  },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 60  },
   ],
 
   siren: [
-    // All Heavy — dense wave, no light hits, faster tempo
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 0 },
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 60 },
-    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 60 },
-    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 60 },
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 60 },
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 60 },
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 160 },
-    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 60 },
-    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 60 },
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 60 },
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 60 },
-    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 60 },
+    // MAX INTENSITY: Full crescendo-decrescendo wave, all Heavy/Rigid
+    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 0   },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 90  },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 90  },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 90  },
+    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 90  },
+    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 90  },
+    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 180 },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 90  },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 90  },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 90  },
+    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 90  },
+    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 90  },
   ],
 
   heartbeat: [
-    // All Heavy — deep double-thump feels like a real heartbeat punch
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 0 },
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 100 },
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 550 },
-    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 100 },
+    // MAX INTENSITY: Bone-deep double-thump with a hard pause — unmistakable
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 0   },
+    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 110 },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 550 },
+    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 110 },
   ],
 };
 
@@ -56,12 +58,39 @@ let isPlaying = false;
  * Play a single haptic impact.
  */
 export async function playOnce(
-  style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Medium,
+  style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Heavy,
 ): Promise<void> {
   try {
     await Haptics.impactAsync(style);
   } catch {
     // Haptics not available (e.g., simulator)
+  }
+}
+
+/**
+ * CRITICAL SLAM — The "Ting" moment haptic.
+ * Fires an immediate escalating barrage of maximum-weight impacts
+ * to announce the notification popup. This bypasses the pattern
+ * queue and fires instantly.
+ */
+export async function playCriticalSlam(): Promise<void> {
+  const sequence: Array<{ style: Haptics.ImpactFeedbackStyle; delay: number }> = [
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 0   },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 55  },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 55  },
+    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 130 },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 55  },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 55  },
+    { style: Haptics.ImpactFeedbackStyle.Heavy, delay: 200 },
+    { style: Haptics.ImpactFeedbackStyle.Rigid, delay: 55  },
+  ];
+
+  let accumulated = 0;
+  for (const step of sequence) {
+    accumulated += step.delay;
+    setTimeout(() => {
+      Haptics.impactAsync(step.style).catch(() => {});
+    }, accumulated);
   }
 }
 
