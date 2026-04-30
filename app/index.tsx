@@ -343,7 +343,7 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000000' },
+  container: { flex: 1, backgroundColor: '#0D0D0D' },
   main: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   glow: {
     position: 'absolute',
@@ -491,10 +491,13 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   toggleContainer: {
-    backgroundColor: Colors.surfaceContainerLow,
-    padding: 20,
-    borderLeftWidth: 2,
-    borderLeftColor: Colors.primaryContainer,
+    backgroundColor: '#181818',
+    padding: 24,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.1)',
+    borderLeftWidth: 4,
+    borderLeftColor: '#FFD700',
   },
   toggleLabelRow: {
     flexDirection: 'row',
@@ -546,12 +549,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 90,
     alignSelf: 'center',
-    backgroundColor: 'rgba(57, 57, 57, 0.9)',
+    backgroundColor: 'rgba(24, 24, 24, 0.95)',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 4,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.15)',
     gap: 12,
     zIndex: 50,
   },

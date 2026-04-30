@@ -52,6 +52,46 @@ let activeTimers: ReturnType<typeof setTimeout>[] = [];
 let loopTimer: ReturnType<typeof setTimeout> | null = null;
 let isPlaying = false;
 
+// ─── Global Intensity Multiplier ─────────────────────────────────────
+// 0-100 scale that the user controls in Settings.
+// Maps to: 0-24→Light, 25-49→Medium, 50-74→Heavy, 75-100→Rigid
+let globalIntensity: number = 75; // default: high
+
+export function setGlobalIntensityMultiplier(value: number): void {
+  globalIntensity = Math.max(0, Math.min(100, value));
+}
+
+export function getGlobalIntensity(): number {
+  return globalIntensity;
+}
+
+/**
+ * Maps an intensity value (0-100) to an ImpactFeedbackStyle cap.
+ * Steps above this cap are clamped down to it.
+ */
+function intensityToMaxStyle(intensity: number): Haptics.ImpactFeedbackStyle {
+  if (intensity < 25) return Haptics.ImpactFeedbackStyle.Light;
+  if (intensity < 50) return Haptics.ImpactFeedbackStyle.Medium;
+  if (intensity < 75) return Haptics.ImpactFeedbackStyle.Heavy;
+  return Haptics.ImpactFeedbackStyle.Rigid;
+}
+
+/**
+ * Clamp a step's style to the current global intensity cap.
+ */
+function clampStyle(style: Haptics.ImpactFeedbackStyle): Haptics.ImpactFeedbackStyle {
+  const cap = intensityToMaxStyle(globalIntensity);
+  const order: Haptics.ImpactFeedbackStyle[] = [
+    Haptics.ImpactFeedbackStyle.Light,
+    Haptics.ImpactFeedbackStyle.Medium,
+    Haptics.ImpactFeedbackStyle.Heavy,
+    Haptics.ImpactFeedbackStyle.Rigid,
+  ];
+  const styleIdx = order.indexOf(style);
+  const capIdx = order.indexOf(cap);
+  return order[Math.min(styleIdx, capIdx)];
+}
+
 // ─── Core Functions ──────────────────────────────────────────────────
 
 /**
@@ -61,7 +101,7 @@ export async function playOnce(
   style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Heavy,
 ): Promise<void> {
   try {
-    await Haptics.impactAsync(style);
+    await Haptics.impactAsync(clampStyle(style));
   } catch {
     // Haptics not available (e.g., simulator)
   }
@@ -169,7 +209,7 @@ export function playPatternOnce(pattern: HapticPattern): void {
   steps.forEach((step) => {
     accumulatedDelay += step.delay;
     const timer = setTimeout(() => {
-      Haptics.impactAsync(step.style).catch(() => {});
+      Haptics.impactAsync(clampStyle(step.style)).catch(() => {});
     }, accumulatedDelay);
     timers.push(timer);
   });
@@ -199,7 +239,7 @@ export function playPatternLoop(pattern: HapticPattern, gapMs: number = 800): vo
       accumulatedDelay += step.delay;
       const timer = setTimeout(() => {
         if (!isPlaying) return;
-        Haptics.impactAsync(step.style).catch(() => {});
+        Haptics.impactAsync(clampStyle(step.style)).catch(() => {});
       }, accumulatedDelay);
       activeTimers.push(timer);
     });

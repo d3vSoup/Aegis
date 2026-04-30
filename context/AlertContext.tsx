@@ -25,7 +25,7 @@ import {
   fireAlertNotification,
   dismissAlertNotifications,
 } from '../utils/NotificationService';
-import { playAlertBurst, playCriticalSlam, playPatternOnce } from '../utils/HapticsEngine';
+import { playAlertBurst, playCriticalSlam, playPatternOnce, setGlobalIntensityMultiplier } from '../utils/HapticsEngine';
 import {
   startBackgroundService,
   stopBackgroundService,
@@ -73,6 +73,7 @@ interface AlertState {
   userName: string;
   defaultHapticPattern: HapticPattern;
   sensitivity: number;
+  hapticIntensity: number;
   eventPatternMap: EventPatternMap;
   alertHistory: AlertEvent[];
   sessionStartTime: Date;
@@ -90,6 +91,7 @@ type AlertAction =
   | { type: 'SET_DEFAULT_PATTERN'; payload: HapticPattern }
   | { type: 'SET_EVENT_PATTERN'; payload: { event: keyof EventPatternMap; pattern: HapticPattern } }
   | { type: 'SET_SENSITIVITY'; payload: number }
+  | { type: 'SET_HAPTIC_INTENSITY'; payload: number }
   | { type: 'CLEAR_HISTORY' }
   | { type: 'HYDRATE'; payload: Partial<AlertState> }
   | { type: 'SET_SAFE_ZONES'; payload: SafeZone[] }
@@ -103,6 +105,7 @@ const initialState: AlertState = {
   userName: '',
   defaultHapticPattern: 'heartbeat',
   sensitivity: 68,
+  hapticIntensity: 75,
   eventPatternMap: {
     horn: 'staccato',
     dog: 'heartbeat',
@@ -159,6 +162,9 @@ function alertReducer(state: AlertState, action: AlertAction): AlertState {
     case 'SET_SENSITIVITY':
       return { ...state, sensitivity: action.payload };
 
+    case 'SET_HAPTIC_INTENSITY':
+      return { ...state, hapticIntensity: action.payload };
+
     case 'CLEAR_HISTORY':
       return { ...state, alertHistory: [], isAlertActive: false, currentAlert: null };
 
@@ -182,6 +188,7 @@ interface AlertContextType extends AlertState {
   setDefaultPattern: (pattern: HapticPattern) => void;
   setEventPattern: (event: keyof EventPatternMap, pattern: HapticPattern) => void;
   setSensitivity: (value: number) => void;
+  setHapticIntensity: (value: number) => void;
   clearHistory: () => void;
   addSafeZone: (name: string) => Promise<void>;
   removeSafeZone: (id: string) => Promise<void>;
@@ -312,6 +319,11 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
     saveSensitivity(value);
   }, []);
 
+  const setHapticIntensity = useCallback((value: number) => {
+    dispatch({ type: 'SET_HAPTIC_INTENSITY', payload: value });
+    setGlobalIntensityMultiplier(value);
+  }, []);
+
   const clearHistory = useCallback(() => {
     dispatch({ type: 'CLEAR_HISTORY' });
     storageClearHistory();
@@ -339,6 +351,7 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
     setDefaultPattern,
     setEventPattern,
     setSensitivity,
+    setHapticIntensity,
     clearHistory,
     addSafeZone,
     removeSafeZone,

@@ -1,353 +1,468 @@
-import React, { useState, useRef } from 'react';
+// ─── About Aegis ──────────────────────────────────────────────────────
+// Replaces the old onboarding flow. A beautiful static "About" page
+// accessible from the bottom tab bar.
+// ─────────────────────────────────────────────────────────────────────
+
+import React, { useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Dimensions,
-  TouchableOpacity,
   ScrollView,
+  Animated,
   Pressable,
 } from 'react-native';
-import { router } from 'expo-router';
 import { Colors } from '../constants/Colors';
 import { AegisBall } from '../components/AegisBall';
-import { markOnboarded } from '../services/StorageService';
-import {
-  playPatternOnce,
-  playMechanicalClick,
-} from '../utils/HapticsEngine';
+import { playPatternOnce } from '../utils/HapticsEngine';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-// ─── Slide Data ───────────────────────────────────────────────────────
-const HAPTIC_DEMOS: Array<{
-  pattern: 'staccato' | 'siren' | 'heartbeat';
-  icon: string;
-  label: string;
-  desc: string;
-}> = [
+const FEATURE_CARDS = [
   {
-    pattern: 'staccato',
-    icon: '💧',
-    label: 'STACCATO',
-    desc: 'Sharp, rapid-fire bursts. Used for sudden, immediate threats like car horns.',
+    icon: '🎙️',
+    title: 'SOUND CLASSIFICATION',
+    desc: 'YAMNet-powered on-device ML detects car horns, dog barks, emergency sirens, and your name in real-time.',
+    accent: '#FFD700',
   },
   {
-    pattern: 'siren',
-    icon: '🌊',
-    label: 'SIREN',
-    desc: 'An oscillating wave. Used for sustained emergency frequencies.',
+    icon: '📳',
+    title: 'HAPTIC LANGUAGE',
+    desc: 'Every detected sound maps to a unique physical rhythm — Staccato, Siren, or Heartbeat. Your body learns the signals.',
+    accent: '#FFD700',
   },
   {
-    pattern: 'heartbeat',
-    icon: '💓',
-    label: 'HEARTBEAT',
-    desc: 'A double-tap thump. Used for personal awareness like your name being called.',
+    icon: '🔒',
+    title: '100% ON-DEVICE PRIVACY',
+    desc: 'No audio is ever recorded, uploaded, or stored. Only timestamped classification results are saved locally on your device.',
+    accent: '#4CAF50',
+  },
+  {
+    icon: '📍',
+    title: 'SMART SAFE ZONES',
+    desc: 'Define GPS-based Safe Zones. Aegis automatically pauses alerts when you are in familiar, low-risk locations.',
+    accent: '#00E5FF',
+  },
+  {
+    icon: '⌚',
+    title: 'WEARABLE EXTENSION',
+    desc: 'Pairs with Apple Watch via Bluetooth to relay haptic alerts directly to your wrist for discreet notifications.',
+    accent: '#FF9500',
   },
 ];
 
-export default function Onboarding() {
-  const [currentSlide, setCurrentSlide] = useState(0);
-  const scrollRef = useRef<ScrollView>(null);
+const HAPTIC_DEMOS = [
+  { pattern: 'staccato' as const, icon: '💧', label: 'STACCATO', color: '#FF9500', desc: 'Sharp rapid bursts — sudden threats' },
+  { pattern: 'siren'    as const, icon: '🌊', label: 'SIREN',    color: '#FF2D2D', desc: 'Oscillating wave — emergency signals' },
+  { pattern: 'heartbeat' as const, icon: '💓', label: 'HEARTBEAT', color: '#FFD700', desc: 'Double-thump pulse — personal alerts' },
+];
 
-  const goToSlide = (index: number) => {
-    scrollRef.current?.scrollTo({ x: index * SCREEN_WIDTH, animated: true });
-    setCurrentSlide(index);
-  };
+const SDG_BADGES = [
+  { num: '03', label: 'GOOD HEALTH', color: '#4CAF50' },
+  { num: '09', label: 'INNOVATION',  color: '#FF9500' },
+  { num: '10', label: 'EQUALITY',    color: '#E91E63' },
+  { num: '11', label: 'SAFE CITIES', color: '#2196F3' },
+];
 
-  const handleNext = () => {
-    if (currentSlide < 2) {
-      goToSlide(currentSlide + 1);
-      playMechanicalClick();
-    }
-  };
-
-  const handleActivate = async () => {
-    playMechanicalClick();
-    await markOnboarded();
-    router.replace('/');
-  };
-
-  // ─── Slide 1: The Shield ──────────────────────────────────────────
-  const renderSlide1 = () => (
-    <View style={styles.slide}>
-      <View style={styles.slideContent}>
-        <View style={styles.ballContainer}>
-          <AegisBall mode="idle" />
-        </View>
-        <View style={styles.textBlock}>
-          <Text style={styles.slideTag}>01 / 03 · THE SHIELD</Text>
-          <Text style={styles.slideTitle}>Your 360°{'\n'}Haptic Sense</Text>
-          <Text style={styles.slideBody}>
-            Aegis is an environmental monitoring framework that translates the sounds around you into
-            distinct physical sensations — an invisible shield against the noise.
-          </Text>
-          <Text style={styles.slideBody}>
-            It runs entirely on your device. No microphone data is ever transmitted or stored as audio.
-            Only classification results are logged locally.
-          </Text>
-        </View>
+function FeatureCard({ icon, title, desc, accent }: typeof FEATURE_CARDS[0]) {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  return (
+    <Animated.View style={[styles.featureCard, { borderLeftColor: accent, transform: [{ scale: scaleAnim }] }]}>
+      <View style={[styles.featureIconBg, { backgroundColor: `${accent}18` }]}>
+        <Text style={styles.featureIcon}>{icon}</Text>
       </View>
-    </View>
+      <View style={styles.featureTextBlock}>
+        <Text style={[styles.featureTitle, { color: accent }]}>{title}</Text>
+        <Text style={styles.featureDesc}>{desc}</Text>
+      </View>
+    </Animated.View>
   );
+}
 
-  // ─── Slide 2: The Language ────────────────────────────────────────
-  const renderSlide2 = () => (
-    <View style={styles.slide}>
-      <View style={styles.slideContent}>
-        <View style={styles.textBlock}>
-          <Text style={styles.slideTag}>02 / 03 · THE LANGUAGE</Text>
-          <Text style={styles.slideTitle}>The{'\n'}Haptic Syntax</Text>
-          <Text style={styles.slideBody}>
-            Every sound type maps to a unique physical rhythm. Tap each pattern below to feel it.
+export default function About() {
+  return (
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ─── Hero Section ─── */}
+        <View style={styles.hero}>
+          <View style={styles.heroGlow} />
+          <AegisBall mode="idle" />
+          <Text style={styles.heroTitle}>Aegis</Text>
+          <Text style={styles.heroTagline}>Your 360° Environmental{'\n'}Haptic Sentinel</Text>
+          <View style={styles.versionRow}>
+            <View style={styles.versionChip}>
+              <Text style={styles.versionText}>v1.0.0 · AURA-54</Text>
+            </View>
+            <View style={[styles.versionChip, { borderColor: 'rgba(76, 175, 80, 0.4)', backgroundColor: 'rgba(76, 175, 80, 0.08)' }]}>
+              <Text style={[styles.versionText, { color: '#4CAF50' }]}>ON-DEVICE ONLY</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* ─── Mission Statement ─── */}
+        <View style={styles.missionBlock}>
+          <View style={styles.missionAccentLine} />
+          <Text style={styles.missionText}>
+            Aegis translates the world's sounds into a private, physical language — giving people who are
+            Deaf, hard of hearing, or in high-noise environments a new sensory layer that is{' '}
+            <Text style={styles.missionHighlight}>always on, always private, and entirely theirs.</Text>
           </Text>
         </View>
 
-        <View style={styles.hapticDemoGrid}>
+        {/* ─── Feel the Patterns ─── */}
+        <Text style={styles.sectionTitle}>HAPTIC PATTERNS</Text>
+        <Text style={styles.sectionSubtitle}>Tap each pattern to feel it on your device</Text>
+        <View style={styles.hapticGrid}>
           {HAPTIC_DEMOS.map((demo) => (
             <Pressable
               key={demo.pattern}
-              style={styles.hapticCard}
+              style={({ pressed }) => [
+                styles.hapticCard,
+                { borderColor: `${demo.color}44` },
+                pressed && styles.hapticCardPressed,
+              ]}
               onPress={() => playPatternOnce(demo.pattern)}
             >
               <Text style={styles.hapticIcon}>{demo.icon}</Text>
-              <Text style={styles.hapticLabel}>{demo.label}</Text>
+              <Text style={[styles.hapticLabel, { color: demo.color }]}>{demo.label}</Text>
               <Text style={styles.hapticDesc}>{demo.desc}</Text>
-              <View style={styles.tapHint}>
-                <Text style={styles.tapHintText}>TAP TO FEEL</Text>
+              <View style={[styles.tapHint, { borderColor: `${demo.color}44`, backgroundColor: `${demo.color}14` }]}>
+                <Text style={[styles.tapHintText, { color: demo.color }]}>TAP TO FEEL</Text>
               </View>
             </Pressable>
           ))}
         </View>
-      </View>
-    </View>
-  );
 
-  // ─── Slide 3: Activate ────────────────────────────────────────────
-  const renderSlide3 = () => (
-    <View style={styles.slide}>
-      <View style={styles.slideContent}>
-        <View style={styles.ballContainer}>
-          <AegisBall mode="armed" />
-        </View>
-        <View style={styles.textBlock}>
-          <Text style={styles.slideTag}>03 / 03 · ARM THE SENTINEL</Text>
-          <Text style={styles.slideTitle}>Ready to{'\n'}Deploy?</Text>
-          <Text style={styles.slideBody}>
-            Enable Safety Mode on the home screen to begin monitoring. The orb will shift to its
-            "ARMED" state and the inference engine will begin listening.
-          </Text>
-          <Text style={[styles.slideBody, { color: Colors.primaryContainer }]}>
-            Triple-tap the orb at any time to run a full demo simulation.
-          </Text>
-        </View>
-
-        <TouchableOpacity style={styles.activateButton} onPress={handleActivate}>
-          <Text style={styles.activateButtonText}>ACTIVATE AEGIS</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.activateHint}>
-          You can revisit this guide from Settings → About Aegis.
-        </Text>
-      </View>
-    </View>
-  );
-
-  return (
-    <View style={styles.container}>
-      {/* Slides */}
-      <ScrollView
-        ref={scrollRef}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        scrollEnabled={false}
-        style={{ flex: 1 }}
-      >
-        {renderSlide1()}
-        {renderSlide2()}
-        {renderSlide3()}
-      </ScrollView>
-
-      {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        {/* Dot indicators */}
-        <View style={styles.dots}>
-          {[0, 1, 2].map((i) => (
-            <Pressable key={i} onPress={() => goToSlide(i)}>
-              <View style={[styles.dot, currentSlide === i && styles.dotActive]} />
-            </Pressable>
+        {/* ─── Features ─── */}
+        <Text style={styles.sectionTitle}>CAPABILITIES</Text>
+        <View style={styles.featuresSection}>
+          {FEATURE_CARDS.map((card) => (
+            <FeatureCard key={card.title} {...card} />
           ))}
         </View>
 
-        {/* Next / Done */}
-        {currentSlide < 2 ? (
-          <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
-            <Text style={styles.nextButtonText}>NEXT →</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={styles.skipButton} onPress={handleActivate}>
-            <Text style={styles.skipText}>SKIP INTRO</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+        {/* ─── SDG Alignment ─── */}
+        <Text style={styles.sectionTitle}>UN SDG ALIGNMENT</Text>
+        <Text style={styles.sectionSubtitle}>Aegis contributes to 4 Sustainable Development Goals</Text>
+        <View style={styles.sdgGrid}>
+          {SDG_BADGES.map(({ num, label, color }) => (
+            <View key={num} style={[styles.sdgBadge, { borderColor: `${color}50`, backgroundColor: `${color}12` }]}>
+              <Text style={[styles.sdgNum, { color }]}>{num}</Text>
+              <Text style={[styles.sdgLabel, { color: `${color}CC` }]}>{label}</Text>
+            </View>
+          ))}
+        </View>
 
-      {/* Skip (slides 1 & 2 only) */}
-      {currentSlide < 2 && (
-        <TouchableOpacity style={styles.headerSkip} onPress={handleActivate}>
-          <Text style={styles.skipText}>SKIP</Text>
-        </TouchableOpacity>
-      )}
+        {/* ─── Tech Stack ─── */}
+        <Text style={styles.sectionTitle}>TECHNICAL STACK</Text>
+        <View style={styles.techBlock}>
+          {[
+            { k: 'FRAMEWORK',   v: 'React Native 0.81 · Expo SDK 54' },
+            { k: 'INFERENCE',   v: 'TFLite · YAMNet (Stub Ready)' },
+            { k: 'HAPTICS',     v: 'expo-haptics · Custom Pattern Engine' },
+            { k: 'STORAGE',     v: 'AsyncStorage · 100% Local' },
+            { k: 'LOCATION',    v: 'expo-location · Geofencing' },
+            { k: 'PLATFORM',    v: 'iOS 16+ · Android 12+' },
+          ].map(({ k, v }, i, arr) => (
+            <View
+              key={k}
+              style={[styles.techRow, i === arr.length - 1 && { borderBottomWidth: 0 }]}
+            >
+              <Text style={styles.techKey}>{k}</Text>
+              <Text style={styles.techVal}>{v}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* ─── Footer ─── */}
+        <View style={styles.footer}>
+          <View style={styles.footerLine} />
+          <Text style={styles.footerText}>AEGIS · BUILT FOR INCLUSION · 2025</Text>
+          <Text style={styles.footerSub}>Expo Go limitations apply to background features.</Text>
+          <Text style={styles.footerSub}>A dev build is required for full background notification support.</Text>
+        </View>
+
+        <View style={{ height: 120 }} />
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000000' },
-  slide: {
-    width: SCREEN_WIDTH,
-    flex: 1,
-    paddingTop: 80,
-    paddingHorizontal: 28,
-    paddingBottom: 120,
-  },
-  slideContent: { flex: 1 },
-  ballContainer: {
+  container: { flex: 1, backgroundColor: '#0D0D0D' },
+  scroll: { flex: 1 },
+  scrollContent: { paddingBottom: 60 },
+
+  // ─── Hero ───────────────────────────────────────────────────────────
+  hero: {
     alignItems: 'center',
-    marginBottom: 32,
-    marginTop: -20,
+    paddingTop: 70,
+    paddingBottom: 40,
+    paddingHorizontal: 24,
   },
-  textBlock: { marginBottom: 32 },
-  slideTag: {
+  heroGlow: {
+    position: 'absolute',
+    top: 50,
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: 'rgba(255, 215, 0, 0.05)',
+    shadowColor: '#FFD700',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 80,
+  },
+  heroTitle: {
+    fontFamily: 'InstrumentSerif_400Regular_Italic',
+    fontSize: 52,
+    color: '#FFD700',
+    letterSpacing: -1,
+    marginTop: 24,
+  },
+  heroTagline: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 15,
+    color: 'rgba(208, 198, 171, 0.75)',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginTop: 8,
+    letterSpacing: 0.3,
+  },
+  versionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 20,
+  },
+  versionChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.3)',
+    backgroundColor: 'rgba(255, 215, 0, 0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  versionText: {
     fontFamily: 'SpaceMono_400Regular',
     fontSize: 9,
-    color: Colors.outlineVariant,
-    letterSpacing: 2,
-    marginBottom: 12,
-  },
-  slideTitle: {
-    fontFamily: 'InstrumentSerif_400Regular_Italic',
-    fontSize: 44,
-    color: Colors.primaryContainer,
-    letterSpacing: -1,
-    lineHeight: 50,
-    marginBottom: 20,
-  },
-  slideBody: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 13,
-    color: Colors.onSurfaceVariant,
-    lineHeight: 22,
-    marginBottom: 12,
+    color: '#FFD700',
+    letterSpacing: 1.5,
   },
 
-  // ─── Haptic Demo ─────────────────────────────────────────────────
-  hapticDemoGrid: { gap: 12 },
-  hapticCard: {
-    backgroundColor: '#1b1b1b',
-    padding: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(77, 71, 50, 0.15)',
+  // ─── Mission ────────────────────────────────────────────────────────
+  missionBlock: {
+    marginHorizontal: 24,
+    marginBottom: 48,
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 16,
   },
-  hapticIcon: { fontSize: 24, width: 36, textAlign: 'center' },
+  missionAccentLine: {
+    width: 3,
+    borderRadius: 2,
+    backgroundColor: '#FFD700',
+    opacity: 0.5,
+  },
+  missionText: {
+    flex: 1,
+    fontFamily: 'InstrumentSerif_400Regular',
+    fontSize: 16,
+    color: 'rgba(208, 198, 171, 0.75)',
+    lineHeight: 26,
+  },
+  missionHighlight: {
+    color: '#FFD700',
+  },
+
+  // ─── Section Headers ────────────────────────────────────────────────
+  sectionTitle: {
+    fontFamily: 'SpaceGrotesk_400Regular',
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 3,
+    color: 'rgba(208, 198, 171, 0.5)',
+    marginBottom: 8,
+    marginTop: 8,
+    paddingHorizontal: 24,
+  },
+  sectionSubtitle: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+    color: 'rgba(208, 198, 171, 0.45)',
+    paddingHorizontal: 24,
+    marginBottom: 16,
+  },
+
+  // ─── Haptic Grid ────────────────────────────────────────────────────
+  hapticGrid: {
+    flexDirection: 'column',
+    gap: 10,
+    paddingHorizontal: 24,
+    marginBottom: 48,
+  },
+  hapticCard: {
+    backgroundColor: '#181818',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  hapticCardPressed: {
+    backgroundColor: '#222',
+  },
+  hapticIcon: { fontSize: 26, width: 34, textAlign: 'center' },
   hapticLabel: {
     fontFamily: 'SpaceGrotesk_500Medium',
-    fontSize: 11,
-    color: Colors.primaryContainer,
-    letterSpacing: 2,
-    marginBottom: 4,
+    fontSize: 12,
+    letterSpacing: 1.5,
+    marginBottom: 2,
   },
   hapticDesc: {
     fontFamily: 'Inter_400Regular',
     fontSize: 10,
-    color: Colors.onSurfaceVariant,
-    lineHeight: 16,
+    color: 'rgba(208, 198, 171, 0.5)',
     flex: 1,
+    lineHeight: 15,
   },
   tapHint: {
-    backgroundColor: 'rgba(255, 215, 0, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 215, 0, 0.2)',
+    borderRadius: 8,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 5,
   },
   tapHintText: {
     fontFamily: 'SpaceMono_400Regular',
     fontSize: 7,
-    color: Colors.primaryContainer,
-    letterSpacing: 1.5,
+    letterSpacing: 1.2,
   },
 
-  // ─── Activate Button ──────────────────────────────────────────────
-  activateButton: {
-    backgroundColor: Colors.primaryContainer,
-    paddingVertical: 18,
+  // ─── Features ───────────────────────────────────────────────────────
+  featuresSection: {
+    gap: 12,
+    paddingHorizontal: 24,
+    marginBottom: 48,
+  },
+  featureCard: {
+    backgroundColor: '#181818',
+    borderRadius: 12,
+    borderLeftWidth: 3,
+    padding: 18,
+    flexDirection: 'row',
+    gap: 16,
+    alignItems: 'flex-start',
+  },
+  featureIconBg: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 16,
+    justifyContent: 'center',
+    flexShrink: 0,
   },
-  activateButtonText: {
-    fontFamily: 'SpaceMono_700Bold',
-    fontSize: 13,
-    color: Colors.onPrimary,
-    letterSpacing: 3,
+  featureIcon: { fontSize: 20 },
+  featureTextBlock: { flex: 1 },
+  featureTitle: {
+    fontFamily: 'SpaceGrotesk_500Medium',
+    fontSize: 11,
+    letterSpacing: 1.5,
+    marginBottom: 5,
   },
-  activateHint: {
+  featureDesc: {
     fontFamily: 'Inter_400Regular',
-    fontSize: 10,
-    color: Colors.outline,
-    textAlign: 'center',
-    lineHeight: 16,
+    fontSize: 11,
+    color: 'rgba(208, 198, 171, 0.6)',
+    lineHeight: 17,
   },
 
-  // ─── Bottom Nav ───────────────────────────────────────────────────
-  bottomNav: {
-    position: 'absolute',
-    bottom: 48,
-    left: 28,
-    right: 28,
+  // ─── SDG Grid ───────────────────────────────────────────────────────
+  sdgGrid: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 24,
+    marginBottom: 48,
+    flexWrap: 'wrap',
+  },
+  sdgBadge: {
+    flex: 1,
+    minWidth: '20%',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  sdgNum: {
+    fontFamily: 'SpaceMono_700Bold',
+    fontSize: 22,
+    letterSpacing: -1,
+  },
+  sdgLabel: {
+    fontFamily: 'SpaceMono_400Regular',
+    fontSize: 7,
+    letterSpacing: 1.2,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+
+  // ─── Tech Stack ─────────────────────────────────────────────────────
+  techBlock: {
+    marginHorizontal: 24,
+    backgroundColor: '#181818',
+    borderRadius: 12,
+    marginBottom: 48,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.1)',
+  },
+  techRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 215, 0, 0.07)',
   },
-  dots: { flexDirection: 'row', gap: 8 },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.outlineVariant,
-  },
-  dotActive: {
-    backgroundColor: Colors.primaryContainer,
-    width: 20,
-    borderRadius: 3,
-    shadowColor: Colors.primaryContainer,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 6,
-  },
-  nextButton: {
-    backgroundColor: 'rgba(255, 215, 0, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 215, 0, 0.3)',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-  },
-  nextButtonText: {
-    fontFamily: 'SpaceMono_700Bold',
-    fontSize: 11,
-    color: Colors.primaryContainer,
-    letterSpacing: 2,
-  },
-  headerSkip: { position: 'absolute', top: 52, right: 28 },
-  skipButton: {},
-  skipText: {
+  techKey: {
     fontFamily: 'SpaceMono_400Regular',
+    fontSize: 9,
+    color: 'rgba(208, 198, 171, 0.45)',
+    letterSpacing: 1.5,
+  },
+  techVal: {
+    fontFamily: 'SpaceGrotesk_500Medium',
     fontSize: 10,
-    color: Colors.outlineVariant,
+    color: 'rgba(208, 198, 171, 0.85)',
+    letterSpacing: 0.3,
+    textAlign: 'right',
+    flex: 1,
+    marginLeft: 16,
+  },
+
+  // ─── Footer ─────────────────────────────────────────────────────────
+  footer: {
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    gap: 8,
+  },
+  footerLine: {
+    width: 1,
+    height: 40,
+    backgroundColor: 'rgba(255, 215, 0, 0.25)',
+    marginBottom: 8,
+  },
+  footerText: {
+    fontFamily: 'SpaceMono_400Regular',
+    fontSize: 9,
+    color: 'rgba(255, 215, 0, 0.4)',
     letterSpacing: 2,
+  },
+  footerSub: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 10,
+    color: 'rgba(208, 198, 171, 0.3)',
+    textAlign: 'center',
+    lineHeight: 16,
   },
 });
