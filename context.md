@@ -55,6 +55,14 @@ Instead of recording long audio files to disk (which causes storage degradation 
 **Problem:** Even without playback interference, mobile OS background restrictions or sudden hardware interrupts (like an incoming phone call) can silently kill an active recording promise without throwing a catchable JS error.
 **The Solution:** Implemented a **Watchdog Timer** in `AudioCapture.ts`. It polls every 3 seconds. If it detects that the audio capture cycle hasn't updated its timestamp in the last 2.5 seconds, it forcefully cleans up the dead recording instances and restarts the loop automatically.
 
+#### The "Strangled Startup" (Location Permissions Crash)
+**Problem:** We noticed the microphone wasn't starting on fresh boots. The root cause was a seemingly unrelated `requestLocationPermission()` call executing on mount. Because Expo Go's `Info.plist` lacks `NSLocation` usage keys by default, this permission request threw an unhandled Promise rejection. This crash aborted the entire JavaScript initialization chain *before* the audio capture could start (`initInference()`), effectively killing the microphone at birth.
+**The Solution:** All peripheral permission requests (Location, Notifications) in `AlertContext.tsx` are now wrapped in `.catch(() => {})` blocks. They are treated as "best-effort" operations, ensuring that the core audio pipeline always initializes cleanly, regardless of peripheral native failures.
+
+#### The Push Notification Native Crash
+**Problem:** When triggering alerts, the app would crash instantly with: `Cannot cast 'nil' for field 'sound'`. Expo SDK 54 heavily refactored notifications, and providing `sound: true` incorrectly or not at all caused native iOS crashes. Additionally, push notifications are largely unsupported in Expo Go.
+**The Solution:** We explicitly enforce `sound: true` in the notification payload to satisfy the iOS typing requirements, and wrap the entire `scheduleNotificationAsync` call in a `try/catch` block that swallows failures silently. The haptic and visual alert pipeline is treated as the primary notification mechanism.
+
 #### Alert Flooding
 **Problem:** In a noisy environment, the classifier would trigger hundreds of alerts a minute, creating a chaotic queue of UI popups and overlapping vibrations.
 **The Solution:** 
