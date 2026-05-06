@@ -28,7 +28,7 @@ export const SIMULATION_INTERVAL_MS = 4000;
 // ─── Debounce ────────────────────────────────────────────────────────
 // Minimum time (ms) between two alerts of the same type.
 // Prevents a 10-second siren from firing 20 haptic sequences.
-export const ALERT_DEBOUNCE_MS = 3000;
+export const ALERT_DEBOUNCE_MS = 2000;
 
 // ─── Decibel Tiers ───────────────────────────────────────────────────
 // Labels displayed in the UI for contextual dB readings.

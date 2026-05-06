@@ -65,12 +65,20 @@ function classify(
 ): LiveClassificationResult | null {
   const offset = ((sensitivity - 50) / 100) * 6; // ±6 dB shift
   const db = meteringDb - offset;
-  const jitter = () => Math.random() * 0.12;
+  const jitter = () => Math.random() * 0.10;
 
-  if (db > 85) return { type: 'siren',         confidence: 0.88 + jitter(), decibels: Math.round(meteringDb) };
-  if (db > 75) return { type: 'horn',           confidence: 0.80 + jitter(), decibels: Math.round(meteringDb) };
-  if (db > 60) return { type: 'dog',            confidence: 0.72 + jitter(), decibels: Math.round(meteringDb) };
-  if (db > 50) return { type: 'name_detected',  confidence: 0.75 + jitter(), decibels: Math.round(meteringDb) };
+  // Thresholds calibrated for real phone mic in expo-av:
+  //   expo-av metering is dBFS (-160→0), +94 ≈ SPL.
+  //   But real readings in a room are typically 40–80 dB on this scale.
+  //   Siren > 72 → only very loud continuous sounds (YouTube siren)
+  //   Horn  > 62 → clap near mic, car horn from video
+  //   Dog   > 50 → dog bark, medium hand clap
+  //   Name  > 35 → normal speaking voice, any detectable sound
+
+  if (db > 72) return { type: 'siren',        confidence: 0.90 + jitter(), decibels: Math.round(meteringDb) };
+  if (db > 62) return { type: 'horn',          confidence: 0.82 + jitter(), decibels: Math.round(meteringDb) };
+  if (db > 50) return { type: 'dog',           confidence: 0.74 + jitter(), decibels: Math.round(meteringDb) };
+  if (db > 35) return { type: 'name_detected', confidence: 0.77 + jitter(), decibels: Math.round(meteringDb) };
   return null;
 }
 

@@ -1,67 +1,95 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity, Pressable,
+  Dimensions, SafeAreaView,
+} from 'react-native';
 import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  interpolateColor,
+  useSharedValue, useAnimatedStyle, withSpring, withRepeat,
+  withSequence, withTiming, interpolateColor, Easing,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
-import { TopAppBar } from '../components/TopAppBar';
 import { AegisBall } from '../components/AegisBall';
 import { TingAlert } from '../components/TingAlert';
 import { useAlert } from '../context/AlertContext';
-import { playMechanicalClick, playPatternOnce, playCriticalSlam, stopPattern } from '../utils/HapticsEngine';
+import {
+  playMechanicalClick, playPatternOnce, playCriticalSlam, stopPattern,
+} from '../utils/HapticsEngine';
 import { createMockAlert, getRandomAlertType } from '../utils/AlertManager';
+import type { AlertEvent } from '../context/AlertContext';
 
+const { width: SW, height: SH } = Dimensions.get('window');
 const AnimatedView = Animated.createAnimatedComponent(View);
 
-// ─── Uptime Formatter ─────────────────────────────────────────────────
 function formatUptime(start: Date): string {
-  const totalSeconds = Math.floor((Date.now() - start.getTime()) / 1000);
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  return [
-    String(h).padStart(2, '0'),
-    String(m).padStart(2, '0'),
-    String(s).padStart(2, '0'),
-  ].join(':');
+  const s = Math.floor((Date.now() - start.getTime()) / 1000);
+  return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
+    .map((v) => String(v).padStart(2, '0'))
+    .join(':');
 }
 
 export default function Home() {
   const {
-    safetyMode,
-    isAlertActive,
-    currentAlert,
-    toggleSafetyMode,
-    triggerAlert,
-    dismissAlert,
-    eventPatternMap,
-    userName,
-    sessionStartTime,
-    alertHistory,
+    safetyMode, isAlertActive, currentAlert,
+    toggleSafetyMode, triggerAlert, dismissAlert,
+    eventPatternMap, userName, sessionStartTime, alertHistory,
   } = useAlert();
 
-  // ─── Live Uptime Ticker ────────────────────────────────────────────
+  const insets = useSafeAreaInsets();
+
+  // ── Uptime ────────────────────────────────────────────────────────
   const [uptime, setUptime] = useState(() => formatUptime(sessionStartTime));
   useEffect(() => {
-    const timer = setInterval(() => {
-      setUptime(formatUptime(sessionStartTime));
-    }, 1000);
-    return () => clearInterval(timer);
+    const t = setInterval(() => setUptime(formatUptime(sessionStartTime)), 1000);
+    return () => clearInterval(t);
   }, [sessionStartTime]);
 
-  // ─── Demo Mode ────────────────────────────────────────────────────
+  // ── Alert Queue ───────────────────────────────────────────────────
+  // Shows one alert at a time. New alerts are queued and shown
+  // only after the current one is acknowledged (ACKNOWLEDGED button).
+  const [tingVisible, setTingVisible] = useState(false);
+  const [displayedAlert, setDisplayedAlert] = useState<AlertEvent | null>(null);
+  const alertQueue = useRef<AlertEvent[]>([]);
+  const processingRef = useRef(false);
+
+  const showNextAlert = useCallback(() => {
+    if (alertQueue.current.length === 0) {
+      processingRef.current = false;
+      setTingVisible(false);
+      setDisplayedAlert(null);
+      return;
+    }
+    const next = alertQueue.current.shift()!;
+    setDisplayedAlert(next);
+    setTingVisible(true);
+    processingRef.current = true;
+  }, []);
+
+  // When a new alert fires, enqueue it
+  useEffect(() => {
+    if (!isAlertActive || !currentAlert) return;
+    alertQueue.current.push(currentAlert);
+    if (!processingRef.current) {
+      showNextAlert();
+    }
+  }, [currentAlert?.id]);
+
+  const handleTingDismiss = useCallback(() => {
+    // Dismiss current TingAlert, then show next in queue after brief pause
+    setTingVisible(false);
+    setTimeout(() => showNextAlert(), 350);
+  }, [showNextAlert]);
+
+  // ── Demo Mode ─────────────────────────────────────────────────────
   const [isDemoMode, setIsDemoMode] = useState(false);
   const tapCount = useRef(0);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const demoTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const demoTypes = useRef(['horn', 'dog', 'siren', 'name_detected'] as const);
   const demoIndex = useRef(0);
+  const demoTypes = useRef(['horn', 'dog', 'siren', 'name_detected'] as const);
 
   const handleBallTap = () => {
-    if (safetyMode) return; // demo only works in idle/standby mode
+    if (safetyMode) return;
     tapCount.current += 1;
     if (tapTimer.current) clearTimeout(tapTimer.current);
     tapTimer.current = setTimeout(() => { tapCount.current = 0; }, 800);
@@ -69,31 +97,27 @@ export default function Home() {
     if (tapCount.current >= 3) {
       tapCount.current = 0;
       if (isDemoMode) {
-        // Stop demo
         if (demoTimer.current) clearInterval(demoTimer.current);
         setIsDemoMode(false);
         stopPattern();
         dismissAlert();
       } else {
-        // Start demo
         setIsDemoMode(true);
         demoIndex.current = 0;
-
         const fireDemoAlert = () => {
           const type = demoTypes.current[demoIndex.current % demoTypes.current.length];
           const event = createMockAlert(type, eventPatternMap, userName);
           triggerAlert(event);
-          playCriticalSlam();          // Max haptic slam on every demo event
+          playCriticalSlam();
           playPatternOnce(event.hapticPattern);
           demoIndex.current += 1;
         };
         fireDemoAlert();
-        demoTimer.current = setInterval(fireDemoAlert, 3500);
+        demoTimer.current = setInterval(fireDemoAlert, 5000);
       }
     }
   };
 
-  // Stop demo if safety mode turns on
   useEffect(() => {
     if (safetyMode && isDemoMode) {
       if (demoTimer.current) clearInterval(demoTimer.current);
@@ -101,241 +125,232 @@ export default function Home() {
     }
   }, [safetyMode]);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (demoTimer.current) clearInterval(demoTimer.current);
-      if (tapTimer.current) clearTimeout(tapTimer.current);
-    };
+  useEffect(() => () => {
+    if (demoTimer.current) clearInterval(demoTimer.current);
+    if (tapTimer.current) clearTimeout(tapTimer.current);
   }, []);
 
-  // ─── Ball Mode ─────────────────────────────────────────────────────
-  const ballMode = isAlertActive ? 'alert' : safetyMode ? 'armed' : 'idle';
-
-  // ─── Toggle Animation ─────────────────────────────────────────────
-  const toggleProgress = useSharedValue(0);
+  // ── Toggle ────────────────────────────────────────────────────────
+  const toggleProgress = useSharedValue(safetyMode ? 1 : 0);
 
   const handleToggle = () => {
     const newMode = !safetyMode;
-    toggleProgress.value = withSpring(newMode ? 1 : 0, { damping: 15, stiffness: 120 });
+    toggleProgress.value = withSpring(newMode ? 1 : 0, { damping: 14, stiffness: 120 });
     playMechanicalClick();
-    if (isAlertActive && !newMode) {
-      stopPattern();
-      dismissAlert();
-    }
+    if (isAlertActive && !newMode) { stopPattern(); dismissAlert(); }
     toggleSafetyMode();
   };
 
   const toggleTrackStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(
-      toggleProgress.value,
-      [0, 1],
-      ['rgba(53, 53, 53, 0.8)', 'rgba(255, 215, 0, 0.3)'],
+      toggleProgress.value, [0, 1],
+      ['rgba(40,40,40,0.9)', 'rgba(255,215,0,0.18)'],
     ),
     borderColor: interpolateColor(
-      toggleProgress.value,
-      [0, 1],
-      ['rgba(77, 71, 50, 0.3)', 'rgba(255, 215, 0, 0.6)'],
+      toggleProgress.value, [0, 1],
+      ['rgba(80,80,80,0.5)', 'rgba(255,215,0,0.7)'],
     ),
   }));
 
   const toggleThumbStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: withSpring(toggleProgress.value * 36, { damping: 15, stiffness: 150 }) },
-    ],
+    transform: [{ translateX: withSpring(toggleProgress.value * 32, { damping: 15, stiffness: 160 }) }],
     backgroundColor: interpolateColor(
-      toggleProgress.value,
-      [0, 1],
-      ['#555555', '#FFD700'],
+      toggleProgress.value, [0, 1], ['#444', '#FFD700'],
     ),
   }));
 
-  // ─── Ting Alert Visibility ─────────────────────────────────────────────
-  // Tracks whether the Ting overlay should be shown. Separate from
-  // isAlertActive so the user can dismiss the popup without stopping
-  // the underlying alert state (the Aegis Ball stays in alert mode).
-  const [tingVisible, setTingVisible] = useState(false);
-
-  // Show the Ting popup the moment a new alert fires
+  // ── Ball pulse when armed ─────────────────────────────────────────
+  const pulseScale = useSharedValue(1);
   useEffect(() => {
-    if (isAlertActive && currentAlert) {
-      setTingVisible(true);
+    if (safetyMode && !isAlertActive) {
+      pulseScale.value = withRepeat(
+        withSequence(
+          withTiming(1.03, { duration: 1800, easing: Easing.inOut(Easing.sin) }),
+          withTiming(1.00, { duration: 1800, easing: Easing.inOut(Easing.sin) }),
+        ), -1, false,
+      );
+    } else {
+      pulseScale.value = withTiming(1, { duration: 300 });
     }
-  }, [currentAlert?.id]); // keyed on ID so re-fires for each unique alert
+  }, [safetyMode, isAlertActive]);
 
-  // ─── Test Alert Handler ───────────────────────────────────────────
-  const handleTestAlert = () => {
-    if (!safetyMode) return;
-    const alertType = getRandomAlertType();
-    const event = createMockAlert(alertType, eventPatternMap, userName);
-    triggerAlert(event);
-    playCriticalSlam();            // Max haptic slam
-    playPatternOnce(event.hapticPattern);
-  };
+  const ballWrapStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulseScale.value }],
+  }));
 
-  const handleDismiss = () => {
-    setTingVisible(false);         // Close the Ting overlay first
+  // ── Glow ──────────────────────────────────────────────────────────
+  const glowOpacity = useSharedValue(0.4);
+  useEffect(() => {
+    glowOpacity.value = withRepeat(
+      withSequence(
+        withTiming(0.8, { duration: 2200 }),
+        withTiming(0.3, { duration: 2200 }),
+      ), -1, false,
+    );
+  }, []);
+  const glowStyle = useAnimatedStyle(() => ({ opacity: glowOpacity.value }));
+
+  // ── State Strings ─────────────────────────────────────────────────
+  const ballMode = isAlertActive ? 'alert' : safetyMode ? 'armed' : 'idle';
+
+  const stateLabel = isAlertActive ? displayedAlert?.label.toUpperCase() ?? 'ALERT'
+    : safetyMode ? 'LISTENING'
+    : isDemoMode ? 'SIMULATION'
+    : 'STANDBY';
+
+  const stateColor = isAlertActive ? '#FF4444'
+    : safetyMode ? '#FFD700'
+    : '#555';
+
+  const handleDismissAlert = () => {
+    setTingVisible(false);
     stopPattern();
     dismissAlert();
+    alertQueue.current = [];
+    processingRef.current = false;
     if (isDemoMode) {
       if (demoTimer.current) clearInterval(demoTimer.current);
       setIsDemoMode(false);
     }
   };
 
-  const handleTingDismiss = () => {
-    // Dismissing the popup alone does NOT stop the underlying alert state.
-    // The Aegis Ball and audio inference continue. Only the popup closes.
-    setTingVisible(false);
-  };
-
-  // ─── Status Text ──────────────────────────────────────────────────
-  const getStatusText = () => {
-    if (isAlertActive && currentAlert) return currentAlert.label.toUpperCase();
-    if (safetyMode) return 'ARMED';
-    if (isDemoMode) return 'DEMO';
-    return 'IDLE';
-  };
-
-  const getStatusSubtext = () => {
-    if (isAlertActive && currentAlert) return `${currentAlert.decibels} dB • ${currentAlert.proximity}`;
-    if (safetyMode) return 'Sentinel active & listening...';
-    if (isDemoMode) return 'Triple-tap to stop demo';
-    return 'Safety mode disabled';
-  };
-
-  const getCoreState = () => {
-    if (isDemoMode) return 'SIMULATION MODE';
-    if (isAlertActive) return 'ALERT ACTIVE';
-    if (safetyMode) return 'SCANNING';
-    return 'CORE STATE';
+  const handleTestAlert = () => {
+    if (!safetyMode) return;
+    const type = getRandomAlertType();
+    const event = createMockAlert(type, eventPatternMap, userName);
+    triggerAlert(event);
+    playCriticalSlam();
+    playPatternOnce(event.hapticPattern);
   };
 
   return (
-    <View style={styles.container}>
-      <TopAppBar subtitle={safetyMode ? (isAlertActive ? 'ALERT' : 'ARMED') : isDemoMode ? 'DEMO' : 'STANDBY'} />
+    <View style={styles.root}>
+      {/* ── Background glow ────────────────────────────── */}
+      <AnimatedView
+        style={[
+          styles.bgGlow,
+          { backgroundColor: isAlertActive ? 'rgba(255,68,68,0.07)' : safetyMode ? 'rgba(255,215,0,0.05)' : 'transparent' },
+          glowStyle,
+        ]}
+        pointerEvents="none"
+      />
 
-      <View style={styles.main}>
-        {/* Glow behind ball */}
-        <View style={[
-          styles.glow,
-          isAlertActive && styles.glowAlert,
-          isDemoMode && !isAlertActive && styles.glowDemo,
-        ]} />
+      <SafeAreaView style={styles.safeArea}>
 
-        {/* The Aegis Ball — tappable for demo mode */}
-        <Pressable onPress={handleBallTap}>
-          <AegisBall mode={ballMode} />
-        </Pressable>
-
-        {/* Demo Badge */}
-        {isDemoMode && (
-          <View style={styles.demoBadge}>
-            <Text style={styles.demoBadgeText}>DEMO · TRIPLE-TAP TO STOP</Text>
+        {/* ── Header ─────────────────────────────────────── */}
+        <View style={[styles.header, { paddingTop: insets.top > 0 ? 0 : 14 }]}>
+          <View style={styles.headerLeft}>
+            <Text style={styles.logoText}>AEGIS</Text>
+            <Text style={styles.logoSub}>SENTINEL SYSTEM</Text>
           </View>
-        )}
-
-        {/* Overlaid Information */}
-        <View pointerEvents="box-none" style={styles.overlay}>
-          {/* Top Right Status */}
-          <View style={styles.topRight}>
-            <Text style={[
-              styles.italicHeadline,
-              isAlertActive && styles.alertText,
-              isDemoMode && styles.demoText,
-            ]}>
-              {isAlertActive ? 'Threat detected...' : safetyMode ? 'Sentinel active...' : isDemoMode ? 'Running simulation...' : 'Awaiting input sequence...'}
+          <View style={styles.headerRight}>
+            <View style={[styles.statusDot, { backgroundColor: safetyMode ? '#FFD700' : '#333' }]} />
+            <Text style={styles.headerStatus}>
+              {safetyMode ? 'ARMED' : 'OFFLINE'}
             </Text>
           </View>
-
-          {/* Bottom Left Data */}
-          <View style={styles.bottomLeft}>
-            <Text style={styles.technicalText}>MODE: {safetyMode ? 'ACTIVE' : isDemoMode ? 'SIMULATE' : 'PASSIVE'}</Text>
-            <Text style={styles.technicalText}>SENS: {isAlertActive ? 'HIGH' : 'NOMINAL'}</Text>
-            <Text style={styles.technicalText}>UPTIME: {uptime}</Text>
-            <Text style={styles.technicalText}>EVENTS: {String(alertHistory.length).padStart(3, '0')}</Text>
-          </View>
-
-          {/* Center Info */}
-          <View style={styles.centerInfo}>
-            <Text style={[styles.coreState, isAlertActive && styles.alertText, isDemoMode && styles.demoText]}>
-              {getCoreState()}
-            </Text>
-            <Text style={[
-              styles.centerStatus,
-              isAlertActive && styles.alertStatusText,
-              isDemoMode && !isAlertActive && styles.demoStatusText,
-            ]}>
-              {getStatusText()}
-            </Text>
-          </View>
-
-          {/* Armed Tag */}
-          {safetyMode && !isAlertActive && (
-            <View style={styles.syncReadyContainer}>
-              <Text style={styles.syncReady}>ARMED</Text>
-            </View>
-          )}
         </View>
-      </View>
 
-      {/* Alert Dismiss Button */}
-      {isAlertActive && (
-        <TouchableOpacity style={styles.dismissButton} onPress={handleDismiss}>
-          <Text style={styles.dismissText}>DISMISS ALERT</Text>
-        </TouchableOpacity>
-      )}
+        {/* ── Central orb area ───────────────────────────── */}
+        <View style={styles.orbArea}>
+          {/* Glow rings */}
+          <View style={[
+            styles.glowRing,
+            isAlertActive && styles.glowRingAlert,
+            safetyMode && !isAlertActive && styles.glowRingArmed,
+          ]} />
+          <View style={[
+            styles.glowRingOuter,
+            isAlertActive && styles.glowRingOuterAlert,
+          ]} />
 
-      {/* Bottom Controls */}
-      <View style={styles.bottomControls}>
-        {!isDemoMode && safetyMode && !isAlertActive && (
-          <TouchableOpacity style={styles.testButton} onPress={handleTestAlert}>
-            <Text style={styles.testButtonIcon}>⚡</Text>
-            <Text style={styles.testButtonText}>TEST ALERT</Text>
-          </TouchableOpacity>
-        )}
-
-        {!isDemoMode && !safetyMode && (
-          <View style={styles.demoHint}>
-            <Text style={styles.demoHintText}>TRIPLE-TAP THE ORB TO RUN SIMULATION</Text>
-          </View>
-        )}
-
-        <View style={styles.toggleContainer}>
-          <View style={styles.toggleLabelRow}>
-            <Text style={styles.toggleLabel}>SAFETY MODE</Text>
-            <Text style={[styles.toggleStatus, safetyMode && styles.toggleStatusActive]}>
-              {safetyMode ? 'ON' : 'OFF'}
-            </Text>
-          </View>
-
-          <Pressable onPress={handleToggle}>
-            <AnimatedView style={[styles.toggleTrack, toggleTrackStyle]}>
-              <AnimatedView style={[styles.toggleThumb, toggleThumbStyle]} />
+          <Pressable onPress={handleBallTap}>
+            <AnimatedView style={ballWrapStyle}>
+              <AegisBall mode={ballMode} />
             </AnimatedView>
           </Pressable>
 
-          <Text style={styles.toggleHint}>
-            {safetyMode ? 'Your sentinel is active. Haptic alerts enabled.' : 'Enable to start environmental monitoring.'}
-          </Text>
-        </View>
-      </View>
+          {/* State label below orb */}
+          <View style={styles.stateLabelRow}>
+            <View style={[styles.stateDot, { backgroundColor: stateColor }]} />
+            <Text style={[styles.stateLabelText, { color: stateColor }]}>
+              {stateLabel}
+            </Text>
+          </View>
 
-      {/* Status Toast */}
-      <View style={[
-        styles.toastContainer,
-        isAlertActive && styles.toastAlert,
-        isDemoMode && !isAlertActive && styles.toastDemo,
-      ]}>
-        <View style={[styles.toastDot, isAlertActive && styles.toastDotAlert, isDemoMode && !isAlertActive && styles.toastDotDemo]} />
-        <Text style={styles.toastText}>
-          {isAlertActive ? 'ALERT IN PROGRESS' : safetyMode ? 'SYSTEM SENTINEL ACTIVE' : isDemoMode ? 'SIMULATION ACTIVE' : 'SENTINEL OFFLINE'}
-        </Text>
-      </View>
-      {/* ─── Ting Alert: Highest-Priority Notification Overlay ─── */}
+          {/* dB + event count chips */}
+          <View style={styles.chipsRow}>
+            <View style={styles.chip}>
+              <Text style={styles.chipLabel}>EVENTS</Text>
+              <Text style={styles.chipValue}>{String(alertHistory.length).padStart(3, '0')}</Text>
+            </View>
+            <View style={styles.chip}>
+              <Text style={styles.chipLabel}>UPTIME</Text>
+              <Text style={styles.chipValue}>{uptime}</Text>
+            </View>
+            <View style={styles.chip}>
+              <Text style={styles.chipLabel}>MODE</Text>
+              <Text style={styles.chipValue}>{safetyMode ? 'ACTIVE' : 'PASSIVE'}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* ── Bottom controls ────────────────────────────── */}
+        <View style={[styles.bottom, { paddingBottom: insets.bottom + 72 }]}>
+
+          {/* Demo hint */}
+          {!safetyMode && !isDemoMode && (
+            <Text style={styles.demoHint}>Triple-tap the orb to run simulation</Text>
+          )}
+
+          {/* Demo badge */}
+          {isDemoMode && (
+            <View style={styles.demoBadge}>
+              <Text style={styles.demoBadgeText}>SIMULATION ACTIVE · TRIPLE-TAP TO STOP</Text>
+            </View>
+          )}
+
+          {/* TEST ALERT button — only when armed */}
+          {safetyMode && !isAlertActive && !isDemoMode && (
+            <TouchableOpacity style={styles.testBtn} onPress={handleTestAlert} activeOpacity={0.75}>
+              <Text style={styles.testBtnIcon}>⚡</Text>
+              <Text style={styles.testBtnText}>TEST ALERT</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* DISMISS button — when alert is active */}
+          {isAlertActive && (
+            <TouchableOpacity style={styles.dismissBtn} onPress={handleDismissAlert} activeOpacity={0.75}>
+              <Text style={styles.dismissBtnText}>✕  CLEAR ALL ALERTS</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Safety Mode Toggle */}
+          <View style={styles.toggleCard}>
+            <View style={styles.toggleRow}>
+              <View>
+                <Text style={styles.toggleCardLabel}>SAFETY MODE</Text>
+                <Text style={styles.toggleCardSub}>
+                  {safetyMode ? 'Sentinel active — listening for threats' : 'Enable to start environmental monitoring'}
+                </Text>
+              </View>
+              <Pressable onPress={handleToggle} style={styles.toggleHitArea}>
+                <AnimatedView style={[styles.toggleTrack, toggleTrackStyle]}>
+                  <AnimatedView style={[styles.toggleThumb, toggleThumbStyle]} />
+                </AnimatedView>
+                <Text style={[styles.toggleState, safetyMode && styles.toggleStateOn]}>
+                  {safetyMode ? 'ON' : 'OFF'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </SafeAreaView>
+
+      {/* ── TingAlert overlay — one at a time ──────────── */}
       <TingAlert
         visible={tingVisible}
-        alert={currentAlert}
+        alert={displayedAlert}
         onDismiss={handleTingDismiss}
       />
     </View>
@@ -343,251 +358,265 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0D0D0D' },
-  main: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  glow: {
-    position: 'absolute',
-    width: 250,
-    height: 250,
-    borderRadius: 125,
-    backgroundColor: 'rgba(255, 215, 0, 0.06)',
-    shadowColor: Colors.primaryContainer,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 60,
-    elevation: 20,
+  root: {
+    flex: 1,
+    backgroundColor: '#080808',
   },
-  glowAlert: {
-    backgroundColor: 'rgba(255, 68, 68, 0.08)',
-    shadowColor: '#FF4444',
-    shadowOpacity: 0.8,
+  bgGlow: {
+    ...StyleSheet.absoluteFillObject,
   },
-  glowDemo: {
-    backgroundColor: 'rgba(121, 245, 255, 0.05)',
-    shadowColor: '#79F5FF',
-    shadowOpacity: 0.5,
+  safeArea: {
+    flex: 1,
   },
-  overlay: { ...StyleSheet.absoluteFillObject, padding: 32, zIndex: 10 },
-  topRight: { position: 'absolute', top: 20, right: 32 },
-  italicHeadline: {
-    fontFamily: 'InstrumentSerif_400Regular_Italic',
-    fontSize: 16,
-    color: Colors.onSurfaceVariant,
-    letterSpacing: 0.5,
+
+  // ── Header ──────────────────────────────────────────
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    paddingHorizontal: 24,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,215,0,0.08)',
   },
-  alertText: { color: '#FF6B6B' },
-  demoText: { color: Colors.tertiaryFixed },
-  bottomLeft: { position: 'absolute', bottom: 160, left: 32 },
-  technicalText: {
-    fontFamily: 'SpaceMono_400Regular',
-    fontSize: 10,
-    color: Colors.surfaceContainerHighest,
-    lineHeight: 18,
-    letterSpacing: 1.5,
-  },
-  centerInfo: {
-    position: 'absolute',
-    top: '44%',
-    left: '50%',
-    transform: [{ translateX: -110 }, { translateY: -25 }],
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 220,
-  },
-  coreState: {
-    fontFamily: 'SpaceMono_400Regular',
-    fontSize: 10,
-    color: Colors.outlineVariant,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  centerStatus: {
+  headerLeft: { gap: 1 },
+  logoText: {
     fontFamily: 'SpaceMono_700Bold',
-    fontSize: 32,
+    fontSize: 22,
     color: '#FFD700',
-    letterSpacing: 1,
-    lineHeight: 42,
+    letterSpacing: 6,
   },
-  alertStatusText: { fontSize: 22, color: '#FF6B6B' },
-  demoStatusText: { color: Colors.tertiaryFixed },
-  syncReadyContainer: {
-    position: 'absolute',
-    top: '28%',
-    right: '20%',
-    backgroundColor: 'rgba(255, 215, 0, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 215, 0, 0.3)',
+  logoSub: {
+    fontFamily: 'SpaceMono_400Regular',
+    fontSize: 7,
+    color: 'rgba(255,215,0,0.4)',
+    letterSpacing: 3,
   },
-  syncReady: {
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  headerStatus: {
     fontFamily: 'SpaceMono_400Regular',
     fontSize: 9,
-    color: Colors.primaryContainer,
-    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.4)',
     letterSpacing: 2,
   },
-  demoBadge: {
+
+  // ── Orb area ─────────────────────────────────────────
+  orbArea: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 24,
+  },
+  glowRing: {
     position: 'absolute',
-    top: -160,
-    backgroundColor: 'rgba(121, 245, 255, 0.12)',
+    width: 260,
+    height: 260,
+    borderRadius: 130,
     borderWidth: 1,
-    borderColor: 'rgba(121, 245, 255, 0.4)',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    borderColor: 'rgba(255,215,0,0.06)',
+    backgroundColor: 'rgba(255,215,0,0.02)',
+  },
+  glowRingArmed: {
+    borderColor: 'rgba(255,215,0,0.18)',
+    backgroundColor: 'rgba(255,215,0,0.04)',
+    shadowColor: '#FFD700',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 40,
+  },
+  glowRingAlert: {
+    borderColor: 'rgba(255,68,68,0.4)',
+    backgroundColor: 'rgba(255,68,68,0.06)',
+    shadowColor: '#FF4444',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 50,
+  },
+  glowRingOuter: {
+    position: 'absolute',
+    width: 340,
+    height: 340,
+    borderRadius: 170,
+    borderWidth: 1,
+    borderColor: 'rgba(255,215,0,0.03)',
+  },
+  glowRingOuterAlert: {
+    borderColor: 'rgba(255,68,68,0.12)',
+  },
+  stateLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  stateDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+  },
+  stateLabelText: {
+    fontFamily: 'SpaceMono_700Bold',
+    fontSize: 13,
+    letterSpacing: 4,
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  chip: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    minWidth: 80,
+  },
+  chipLabel: {
+    fontFamily: 'SpaceMono_400Regular',
+    fontSize: 7,
+    color: 'rgba(255,255,255,0.3)',
+    letterSpacing: 1.5,
+    marginBottom: 3,
+  },
+  chipValue: {
+    fontFamily: 'SpaceMono_700Bold',
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.7)',
+    letterSpacing: 1,
+  },
+
+  // ── Bottom ────────────────────────────────────────────
+  bottom: {
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  demoHint: {
+    fontFamily: 'SpaceMono_400Regular',
+    fontSize: 9,
+    color: 'rgba(255,255,255,0.2)',
+    textAlign: 'center',
+    letterSpacing: 1.5,
+  },
+  demoBadge: {
+    backgroundColor: 'rgba(121,245,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(121,245,255,0.25)',
+    borderRadius: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
   },
   demoBadgeText: {
     fontFamily: 'SpaceMono_400Regular',
-    fontSize: 9,
-    color: Colors.tertiaryFixed,
+    fontSize: 8,
+    color: '#79F5FF',
     letterSpacing: 2,
   },
-
-  // ─── Dismiss ──────────────────────────────────────────────────────
-  dismissButton: {
-    position: 'absolute',
-    top: 130,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(255, 68, 68, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 68, 68, 0.4)',
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    zIndex: 20,
-  },
-  dismissText: {
-    fontFamily: 'SpaceMono_700Bold',
-    fontSize: 11,
-    color: '#FF6B6B',
-    letterSpacing: 2,
-  },
-
-  // ─── Bottom Controls ──────────────────────────────────────────────
-  bottomControls: { paddingHorizontal: 32, paddingBottom: 100, gap: 16 },
-  testButton: {
+  testBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: 'rgba(255, 215, 0, 0.08)',
+    backgroundColor: 'rgba(255,215,0,0.07)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 215, 0, 0.2)',
-    paddingVertical: 12,
+    borderColor: 'rgba(255,215,0,0.25)',
+    borderRadius: 8,
+    paddingVertical: 13,
+  },
+  testBtnIcon: { fontSize: 13 },
+  testBtnText: {
+    fontFamily: 'SpaceMono_700Bold',
+    fontSize: 10,
+    color: '#FFD700',
+    letterSpacing: 2.5,
+  },
+  dismissBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,68,68,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,68,68,0.4)',
+    borderRadius: 8,
+    paddingVertical: 13,
+  },
+  dismissBtnText: {
+    fontFamily: 'SpaceMono_700Bold',
+    fontSize: 10,
+    color: '#FF6B6B',
+    letterSpacing: 2,
+  },
+
+  // ── Toggle card ──────────────────────────────────────
+  toggleCard: {
+    backgroundColor: '#111',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,215,0,0.12)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#FFD700',
+    padding: 20,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  toggleCardLabel: {
+    fontFamily: 'SpaceGrotesk_500Medium',
+    fontSize: 11,
+    color: '#fff',
+    letterSpacing: 2.5,
     marginBottom: 4,
   },
-  testButtonIcon: { fontSize: 14 },
-  testButtonText: {
-    fontFamily: 'SpaceMono_700Bold',
-    fontSize: 11,
-    color: Colors.primaryContainer,
-    letterSpacing: 2,
+  toggleCardSub: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.35)',
+    maxWidth: 200,
+    lineHeight: 14,
   },
-  demoHint: { alignItems: 'center', paddingVertical: 6 },
-  demoHintText: {
-    fontFamily: 'SpaceMono_400Regular',
-    fontSize: 8,
-    color: 'rgba(121, 245, 255, 0.4)',
-    letterSpacing: 2,
-  },
-  toggleContainer: {
-    backgroundColor: '#181818',
-    padding: 24,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 215, 0, 0.1)',
-    borderLeftWidth: 4,
-    borderLeftColor: '#FFD700',
-  },
-  toggleLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  toggleHitArea: {
     alignItems: 'center',
-    marginBottom: 16,
+    gap: 4,
   },
-  toggleLabel: {
-    fontFamily: 'SpaceGrotesk_500Medium',
-    fontSize: 12,
-    color: Colors.onSurface,
-    letterSpacing: 2,
-  },
-  toggleStatus: {
-    fontFamily: 'SpaceMono_700Bold',
-    fontSize: 11,
-    color: Colors.surfaceContainerHighest,
-    letterSpacing: 2,
-  },
-  toggleStatusActive: { color: Colors.primaryContainer },
   toggleTrack: {
-    width: 72,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
+    width: 64,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1.5,
     justifyContent: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
   },
   toggleThumb: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.4,
     shadowRadius: 4,
     elevation: 4,
   },
-  toggleHint: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 10,
-    color: Colors.onSurfaceVariant,
-    marginTop: 12,
-    letterSpacing: 0.3,
+  toggleState: {
+    fontFamily: 'SpaceMono_700Bold',
+    fontSize: 8,
+    color: 'rgba(255,255,255,0.3)',
+    letterSpacing: 2,
   },
-
-  // ─── Toast ────────────────────────────────────────────────────────
-  toastContainer: {
-    position: 'absolute',
-    bottom: 90,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(24, 24, 24, 0.95)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 215, 0, 0.15)',
-    gap: 12,
-    zIndex: 50,
-  },
-  toastAlert: {
-    backgroundColor: 'rgba(255, 68, 68, 0.2)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 68, 68, 0.3)',
-  },
-  toastDemo: {
-    backgroundColor: 'rgba(121, 245, 255, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(121, 245, 255, 0.25)',
-  },
-  toastDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.primaryContainer,
-    shadowColor: Colors.primaryContainer,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  toastDotAlert: { backgroundColor: '#FF4444', shadowColor: '#FF4444' },
-  toastDotDemo: { backgroundColor: Colors.tertiaryFixed, shadowColor: Colors.tertiaryFixed },
-  toastText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 11,
-    color: '#ffffff',
-    textTransform: 'uppercase',
-    letterSpacing: 1.5,
+  toggleStateOn: {
+    color: '#FFD700',
   },
 });
