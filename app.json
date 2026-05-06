@@ -44,6 +44,14 @@
         {
           "microphonePermission": "Aegis uses the microphone to detect emergency sounds, dog barks, and your name — so you stay aware of your environment. No audio is ever recorded or uploaded."
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Aegis uses background location to pause alerts in Safe Zones you define.",
+          "locationWhenInUsePermission": "Aegis uses your location to pause alerts in Safe Zones you define.",
+          "isIosBackgroundLocationEnabled": true
+        }
       ]
     ],
     "scheme": "aegis"

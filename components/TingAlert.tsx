@@ -35,6 +35,10 @@ import { Audio } from 'expo-av';
 import type { AlertEvent } from '../context/AlertContext';
 import { playCriticalSlam } from '../utils/HapticsEngine';
 import { getAlertSeverity, getAlertDescription } from '../utils/AlertManager';
+import {
+  suspendCaptureForPlayback,
+  resumeCaptureAfterPlayback,
+} from '../services/AudioCapture';
 
 // ─── Types ───────────────────────────────────────────────────────────
 interface TingAlertProps {
@@ -81,12 +85,13 @@ export function TingAlert({ visible, alert, onDismiss }: TingAlertProps) {
   // ── Play Alert Sound via expo-av ──────────────────────────────────
   async function playAlertSound() {
     try {
-      // ⚠️  The AudioCapture service holds the session in recording mode
-      // (allowsRecordingIOS: true). We must temporarily hand off the session
-      // to playback mode so the speaker fires, then restore recording mode.
+      // 1. Suspend the mic capture cycle so we own the audio session
+      await suspendCaptureForPlayback();
+
+      // 2. Switch session to playback mode (releases recording lock → speaker fires)
       await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,       // Release mic lock → speaker unlocks
-        playsInSilentModeIOS: true,      // Override silent switch
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,        // Plays over silent switch
         staysActiveInBackground: false,
         shouldDuckAndroid: false,
         interruptionModeIOS: 1,
@@ -94,45 +99,26 @@ export function TingAlert({ visible, alert, onDismiss }: TingAlertProps) {
         playThroughEarpieceAndroid: false,
       });
 
+      // 3. Load + play ting.wav at full blast
       const { sound } = await Audio.Sound.createAsync(
         require('../assets/sounds/ting.wav'),
-        {
-          shouldPlay: true,
-          volume: 1.0,
-          isMuted: false,
-        },
+        { shouldPlay: true, volume: 1.0, isMuted: false },
       );
       soundRef.current = sound;
 
+      // 4. When done, restore session and resume capture
       sound.setOnPlaybackStatusUpdate((status) => {
         if ('didJustFinish' in status && status.didJustFinish) {
           sound.unloadAsync().catch(() => {});
           soundRef.current = null;
-
-          // Restore recording mode so AudioCapture can resume mic input
-          Audio.setAudioModeAsync({
-            allowsRecordingIOS: true,
-            playsInSilentModeIOS: true,
-            staysActiveInBackground: true,
-            shouldDuckAndroid: false,
-            interruptionModeIOS: 1,
-            interruptionModeAndroid: 1,
-            playThroughEarpieceAndroid: false,
-          }).catch(() => {});
+          resumeCaptureAfterPlayback(); // mic comes back automatically
         }
       });
+
     } catch (e) {
-      console.warn('[TingAlert] Sound playback failed:', e);
-      // Always restore recording mode even on failure
-      Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: false,
-        interruptionModeIOS: 1,
-        interruptionModeAndroid: 1,
-        playThroughEarpieceAndroid: false,
-      }).catch(() => {});
+      console.warn('[TingAlert] Sound failed:', e);
+      // Always restore capture even if sound fails
+      resumeCaptureAfterPlayback();
     }
   }
 

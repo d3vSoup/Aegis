@@ -109,6 +109,10 @@ async function runCaptureCycle(): Promise<void> {
   if (!_isCapturing) return;
 
   try {
+    // Re-assert recording audio mode before each cycle.
+    // This is cheap and ensures the session is correct after any playback.
+    await Audio.setAudioModeAsync(AUDIO_MODE);
+
     // Create and start a fresh 1-second recording
     const { recording } = await Audio.Recording.createAsync(
       {
@@ -148,10 +152,10 @@ async function runCaptureCycle(): Promise<void> {
       runCaptureCycle();
     }, 1000);
 
-  } catch (err) {
-    // If recording fails (permissions denied, hardware busy), back off and retry
+  } catch {
+    // If recording fails (session hijacked, hardware busy), back off and retry
     if (_isCapturing) {
-      _captureLoop = setTimeout(() => runCaptureCycle(), 2000);
+      _captureLoop = setTimeout(() => runCaptureCycle(), 500);
     }
   }
 }
@@ -219,4 +223,46 @@ export function setCaptureSensitivity(sensitivity: number): void {
 
 export function isCapturing(): boolean {
   return _isCapturing;
+}
+
+/**
+ * Suspend capture so the audio session can be handed to a sound player.
+ * Stops the current recording and clears the loop — does NOT set
+ * _isCapturing to false, so resumeAfterPlayback() can restart cleanly.
+ */
+export async function suspendCaptureForPlayback(): Promise<void> {
+  if (_captureLoop) {
+    clearTimeout(_captureLoop);
+    _captureLoop = null;
+  }
+  if (_recording) {
+    try {
+      await _recording.stopAndUnloadAsync();
+    } catch {
+      // Already unloaded
+    }
+    _recording = null;
+  }
+}
+
+/**
+ * Resume capture after a sound has finished playing.
+ * Re-asserts recording audio mode and restarts the cycle.
+ */
+export function resumeCaptureAfterPlayback(): void {
+  if (!_isCapturing) return; // was stopped entirely — don't restart
+  // Small delay to let the audio session fully release
+  setTimeout(() => runCaptureCycle(), 300);
+}
+
+/**
+ * Restore the recording audio mode without restarting the capture cycle.
+ * Useful to call before resumeCaptureAfterPlayback.
+ */
+export async function restoreRecordingAudioMode(): Promise<void> {
+  try {
+    await Audio.setAudioModeAsync(AUDIO_MODE);
+  } catch {
+    // ignore
+  }
 }

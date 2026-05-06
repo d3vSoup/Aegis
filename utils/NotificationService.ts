@@ -23,8 +23,7 @@ const ALERT_ICONS: Record<string, string> = {
 // ─── Configure how notifications are displayed when app is foregrounded
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,   // show banner even when app is open
-    shouldPlaySound: true,   // play the ting
+    shouldPlaySound: true,
     shouldSetBadge: false,
     shouldShowBanner: true,
     shouldShowList: true,
@@ -76,17 +75,14 @@ export async function fireAlertNotification(event: AlertEvent): Promise<void> {
   const icon = ALERT_ICONS[event.type] ?? '⚠️';
 
   try {
-    // Build content carefully — iOS Expo Go throws a nil-cast if sound is
-    // anything other than a string or boolean. We use Platform guard here.
     const content: Notifications.NotificationContentInput = {
       title: `${icon} AEGIS ALERT — ${event.label.toUpperCase()}`,
       body: `${event.decibels} dB detected${event.proximity ? ` · ${event.proximity}` : ''}`,
       data: { alertId: event.id, type: event.type },
+      sound: true, // Must be boolean or string — never null/undefined (iOS nil crash)
     };
 
-    // Only set sound on Android — iOS Expo Go throws nil cast for sound field
     if (Platform.OS === 'android') {
-      content.sound = 'default';
       content.priority = Notifications.AndroidNotificationPriority.MAX;
     }
 

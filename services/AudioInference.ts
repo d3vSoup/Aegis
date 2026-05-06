@@ -44,7 +44,7 @@ type InferenceCallback = (result: ClassificationResult) => void;
 let isRunning = false;
 const lastAlertTime: Partial<Record<AlertEventType, number>> = {};
 let _globalLastAlertTime = 0;
-const GLOBAL_COOLDOWN_MS = 5000; // Min time between ANY alerts (all types)
+const GLOBAL_COOLDOWN_MS = 2000; // Min time between ANY alerts (all types)
 
 // ─── Debounce ────────────────────────────────────────────────────────
 
