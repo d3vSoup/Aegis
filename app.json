@@ -38,7 +38,13 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Aegis uses the microphone to detect emergency sounds, dog barks, and your name — so you stay aware of your environment. No audio is ever recorded or uploaded."
+        }
+      ]
     ],
     "scheme": "aegis"
   }

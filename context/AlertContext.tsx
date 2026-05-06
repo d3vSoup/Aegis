@@ -16,9 +16,11 @@ import {
   loadSensitivity,
 } from '../services/StorageService';
 import {
+  initInference,
   startInference,
   stopInference,
 } from '../services/AudioInference';
+import { setCaptureSensitivity } from '../services/AudioCapture';
 import { createMockAlert } from '../utils/AlertManager';
 import {
   setupNotifications,
@@ -201,10 +203,12 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(alertReducer, initialState);
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Request notification permissions + load safe zones on mount ───
+  // ── Request notification + mic permissions + load safe zones on mount ──
   useEffect(() => {
     setupNotifications();
     requestLocationPermission();
+    // Request microphone permission and init audio session immediately
+    initInference();
     loadSafeZones().then((zones) => {
       dispatch({ type: 'SET_SAFE_ZONES', payload: zones });
     });
@@ -317,6 +321,8 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
   const setSensitivity = useCallback((value: number) => {
     dispatch({ type: 'SET_SENSITIVITY', payload: value });
     saveSensitivity(value);
+    // Propagate live to the running microphone capture engine
+    setCaptureSensitivity(value);
   }, []);
 
   const setHapticIntensity = useCallback((value: number) => {

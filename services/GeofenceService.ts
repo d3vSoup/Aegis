@@ -33,7 +33,7 @@ const DEFAULT_RADIUS_METERS = 200;
 
 let _geofenceCallback: GeofenceCallback | null = null;
 
-TaskManager.defineTask(GEOFENCE_TASK, ({ data, error }: any) => {
+TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: any) => {
   if (error) {
     console.warn('[Aegis Geofence]', error);
     return;
