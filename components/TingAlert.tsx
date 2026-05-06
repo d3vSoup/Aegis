@@ -11,7 +11,7 @@
 //   - Plays `playCriticalSlam()` for maximum haptic impact.
 // ─────────────────────────────────────────────────────────────────────
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import {
   Modal,
   View,
@@ -29,16 +29,10 @@ import Animated, {
   withSpring,
   withRepeat,
   Easing,
-  runOnJS,
 } from 'react-native-reanimated';
-import { Audio } from 'expo-av';
 import type { AlertEvent } from '../context/AlertContext';
 import { playCriticalSlam } from '../utils/HapticsEngine';
 import { getAlertSeverity, getAlertDescription } from '../utils/AlertManager';
-import {
-  suspendCaptureForPlayback,
-  resumeCaptureAfterPlayback,
-} from '../services/AudioCapture';
 
 // ─── Types ───────────────────────────────────────────────────────────
 interface TingAlertProps {
@@ -72,8 +66,6 @@ const { width: SCREEN_W } = Dimensions.get('window');
 
 // ─── Component ───────────────────────────────────────────────────────
 export function TingAlert({ visible, alert, onDismiss }: TingAlertProps) {
-  const soundRef = useRef<Audio.Sound | null>(null);
-
   // ── Animation Values ──────────────────────────────────────────────
   const overlayOpacity  = useSharedValue(0);
   const cardScale       = useSharedValue(0.7);
@@ -82,69 +74,26 @@ export function TingAlert({ visible, alert, onDismiss }: TingAlertProps) {
   const iconBounce      = useSharedValue(0);
   const scanLine        = useSharedValue(-1); // -1 to 1 (top to bottom)
 
-  // ── Play Alert Sound via expo-av ──────────────────────────────────
-  async function playAlertSound() {
-    try {
-      // 1. Suspend the mic capture cycle so we own the audio session
-      await suspendCaptureForPlayback();
-
-      // 2. Switch session to playback mode (releases recording lock → speaker fires)
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,        // Plays over silent switch
-        staysActiveInBackground: false,
-        shouldDuckAndroid: false,
-        interruptionModeIOS: 1,
-        interruptionModeAndroid: 1,
-        playThroughEarpieceAndroid: false,
-      });
-
-      // 3. Load + play ting.wav at full blast
-      const { sound } = await Audio.Sound.createAsync(
-        require('../assets/sounds/ting.wav'),
-        { shouldPlay: true, volume: 1.0, isMuted: false },
-      );
-      soundRef.current = sound;
-
-      // 4. When done, restore session and resume capture
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if ('didJustFinish' in status && status.didJustFinish) {
-          sound.unloadAsync().catch(() => {});
-          soundRef.current = null;
-          resumeCaptureAfterPlayback(); // mic comes back automatically
-        }
-      });
-
-    } catch (e) {
-      console.warn('[TingAlert] Sound failed:', e);
-      // Always restore capture even if sound fails
-      resumeCaptureAfterPlayback();
-    }
-  }
-
   // ── Mount/Enter Sequence ──────────────────────────────────────────
   useEffect(() => {
     if (visible && alert) {
       // 1. Fire the maximum-strength haptic slam immediately
       playCriticalSlam();
 
-      // 2. Fire the loud sound
-      playAlertSound();
-
-      // 3. Animate the overlay in
+      // 2. Animate the overlay in
       overlayOpacity.value = withTiming(1, { duration: 180, easing: Easing.out(Easing.quad) });
 
-      // 4. Slam the card into place with an overshoot spring
+      // 3. Slam the card into place with an overshoot spring
       cardScale.value   = withSpring(1,   { damping: 12, stiffness: 200, mass: 0.8 });
       cardOpacity.value = withTiming(1,   { duration: 150 });
 
-      // 5. Start the icon bounce animation
+      // 4. Start the icon bounce animation
       iconBounce.value = withSequence(
         withSpring(-24, { damping: 4, stiffness: 300 }),
         withSpring(0,   { damping: 8, stiffness: 180 }),
       );
 
-      // 6. Start the looping accent pulse
+      // 5. Start the looping accent pulse
       pulseScale.value = withRepeat(
         withSequence(
           withTiming(1.08, { duration: 600, easing: Easing.inOut(Easing.sin) }),
@@ -154,7 +103,7 @@ export function TingAlert({ visible, alert, onDismiss }: TingAlertProps) {
         false,
       );
 
-      // 7. Start the scan-line sweep
+      // 6. Start the scan-line sweep
       scanLine.value = withRepeat(
         withTiming(1, { duration: 1800, easing: Easing.inOut(Easing.quad) }),
         -1,
@@ -167,10 +116,6 @@ export function TingAlert({ visible, alert, onDismiss }: TingAlertProps) {
       cardOpacity.value    = withTiming(0, { duration: 150 });
       pulseScale.value     = 1;
       scanLine.value       = -1;
-
-      // Unload sound if still playing
-      soundRef.current?.unloadAsync().catch(() => {});
-      soundRef.current = null;
     }
   }, [visible, alert]);
 

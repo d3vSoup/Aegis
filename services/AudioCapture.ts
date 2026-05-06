@@ -1,16 +1,17 @@
 // ─── AudioCapture.ts ─────────────────────────────────────────────────
 // Aegis Live Microphone Intake Layer.
 //
-// Uses expo-av Audio.Recording for continuous 1-second PCM capture.
-// For each chunk, RMS dB is computed and mapped to an alert type
-// via a heuristic classifier — no TFLite required, works in Expo Go.
+// Strategy: RECORDING ONLY. No audio playback ever happens through this
+// service. TingAlert visual overlay + haptics handle user notification.
+// This gives us a permanent, unbreakable mic capture loop.
 //
-// UPGRADE PATH (after `npx expo run:ios`):
-//   Replace this file with react-native-audio-record streaming.
-//   AudioInference.ts, AlertContext.tsx stay untouched.
+// Architecture:
+//   - 1-second recording chunks, metering every 200ms
+//   - Watchdog timer restarts the loop if it ever silently dies
+//   - Audio session is NEVER switched away from recording mode
 // ─────────────────────────────────────────────────────────────────────
 
-import { Audio, type AudioMode } from 'expo-av';
+import { Audio } from 'expo-av';
 import type { AlertEventType } from '../context/AlertContext';
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -26,149 +27,145 @@ type AudioCaptureCallback = (result: LiveClassificationResult) => void;
 // ─── Internal State ──────────────────────────────────────────────────
 
 let _recording: Audio.Recording | null = null;
-let _captureLoop: ReturnType<typeof setTimeout> | null = null;
+let _cycleTimer: ReturnType<typeof setTimeout> | null = null;
+let _watchdogTimer: ReturnType<typeof setInterval> | null = null;
 let _isCapturing = false;
 let _callback: AudioCaptureCallback | null = null;
-let _sensitivity = 68; // 0–100 — maps to dB floor adjustment
+let _sensitivity = 68;
+let _lastCycleAt = 0;  // timestamp of last successful cycle start
 
-// ─── Audio Mode ───────────────────────────────────────────────────────
+// ─── Recording-only audio mode ────────────────────────────────────────
+// This mode is set ONCE on init and NEVER changed.
+// Changing it mid-session is what causes the mic to die.
 
-const AUDIO_MODE: AudioMode = {
+const RECORDING_MODE = {
   allowsRecordingIOS: true,
   playsInSilentModeIOS: true,
   staysActiveInBackground: true,
-  interruptionModeIOS: 1,         // MixWithOthers
+  interruptionModeIOS: 1,          // DoNotMix
   interruptionModeAndroid: 1,
   shouldDuckAndroid: false,
   playThroughEarpieceAndroid: false,
-};
+} as const;
 
 // ─── Heuristic Classifier ─────────────────────────────────────────────
+// expo-av metering: -160 (silence) → ~0 (peak clipping)
+// + 94 offset → approximate SPL in dB
 //
-// Maps real microphone dB level to Aegis alert types.
-//
-// Sensitivity (0–100) shifts the dB floor by ±6 dB.
-// Sensitivity 100 = triggers 6 dB quieter (more sensitive).
-// Sensitivity 0   = triggers 6 dB louder (less sensitive).
-//
-// dB thresholds (adjusted by sensitivity):
-//   > 85 dB  → siren        (confidence 0.88–0.95)
-//   75–85 dB → horn         (confidence 0.80–0.92)
-//   60–75 dB → dog          (confidence 0.72–0.85)
-//   50–60 dB → name_detected (confidence 0.75–0.88)
-//   < 50 dB  → null (silence, no event)
+// dB → alert type mapping (sensitivity shifts floor ±6 dB):
+//   > 85 → siren         confidence 0.88–1.00
+//   > 75 → horn          confidence 0.80–0.92
+//   > 60 → dog           confidence 0.72–0.84
+//   > 50 → name_detected confidence 0.75–0.87
+//   ≤ 50 → null (silence)
 
 function classify(
   meteringDb: number,
   sensitivity: number,
 ): LiveClassificationResult | null {
-  // Sensitivity shifts threshold floor by ±6 dB
-  const sensitivityOffset = ((sensitivity - 50) / 100) * 6;
-  const db = meteringDb - sensitivityOffset;
+  const offset = ((sensitivity - 50) / 100) * 6; // ±6 dB shift
+  const db = meteringDb - offset;
+  const jitter = () => Math.random() * 0.12;
 
-  const jitter = () => Math.random() * 0.12; // adds ±0–12% confidence noise
-
-  if (db > 85) {
-    return {
-      type: 'siren',
-      confidence: 0.88 + jitter(),
-      decibels: Math.round(meteringDb),
-    };
-  }
-  if (db > 75) {
-    return {
-      type: 'horn',
-      confidence: 0.80 + jitter(),
-      decibels: Math.round(meteringDb),
-    };
-  }
-  if (db > 60) {
-    return {
-      type: 'dog',
-      confidence: 0.72 + jitter(),
-      decibels: Math.round(meteringDb),
-    };
-  }
-  if (db > 50) {
-    return {
-      type: 'name_detected',
-      confidence: 0.75 + jitter(),
-      decibels: Math.round(meteringDb),
-    };
-  }
-
-  return null; // Below threshold — silence
+  if (db > 85) return { type: 'siren',         confidence: 0.88 + jitter(), decibels: Math.round(meteringDb) };
+  if (db > 75) return { type: 'horn',           confidence: 0.80 + jitter(), decibels: Math.round(meteringDb) };
+  if (db > 60) return { type: 'dog',            confidence: 0.72 + jitter(), decibels: Math.round(meteringDb) };
+  if (db > 50) return { type: 'name_detected',  confidence: 0.75 + jitter(), decibels: Math.round(meteringDb) };
+  return null;
 }
 
-// ─── Capture Cycle ────────────────────────────────────────────────────
-//
-// Records a 1-second chunk, reads its metering status,
-// classifies the dB level, then loops.
+// ─── Core Capture Cycle ───────────────────────────────────────────────
+// Runs a 1-second recording chunk. On completion, immediately schedules
+// the next cycle. Any error causes a 300ms backoff then retry.
 
-async function runCaptureCycle(): Promise<void> {
+async function runCycle(): Promise<void> {
   if (!_isCapturing) return;
 
-  try {
-    // Re-assert recording audio mode before each cycle.
-    // This is cheap and ensures the session is correct after any playback.
-    await Audio.setAudioModeAsync(AUDIO_MODE);
+  _lastCycleAt = Date.now();
 
-    // Create and start a fresh 1-second recording
+  let rec: Audio.Recording | null = null;
+
+  try {
     const { recording } = await Audio.Recording.createAsync(
-      {
-        ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
-        isMeteringEnabled: true,
-      },
+      { ...Audio.RecordingOptionsPresets.HIGH_QUALITY, isMeteringEnabled: true },
       (status) => {
-        // Status fires ~every 200ms while recording
+        if (!_isCapturing) return;
         if (!status.isRecording) return;
 
-        const meteringDb = status.metering ?? -160;
-
-        // expo-av metering returns values like -160 (silence) to ~0 (peak)
-        // Convert to approximate SPL (add ~94 dB standard offset)
-        const spl = meteringDb + 94;
-
+        const spl = (status.metering ?? -160) + 94;
         const result = classify(spl, _sensitivity);
         if (result && _callback) {
           _callback(result);
         }
       },
-      200, // Status update interval in ms
+      200,
     );
 
-    _recording = recording;
+    rec = recording;
+    _recording = rec;
 
-    // Let it record for 1 second, then stop and loop
-    _captureLoop = setTimeout(async () => {
-      if (!_isCapturing) return;
-      try {
-        await recording.stopAndUnloadAsync();
-      } catch {
-        // Recording may have already stopped
-      }
+    // Record for 950ms, then stop and immediately loop
+    _cycleTimer = setTimeout(async () => {
       _recording = null;
-      // Immediately start next cycle
-      runCaptureCycle();
-    }, 1000);
+      try {
+        await rec!.stopAndUnloadAsync();
+      } catch {
+        // Already stopped — fine
+      }
+      // Next cycle immediately
+      if (_isCapturing) runCycle();
+    }, 950);
 
   } catch {
-    // If recording fails (session hijacked, hardware busy), back off and retry
-    if (_isCapturing) {
-      _captureLoop = setTimeout(() => runCaptureCycle(), 500);
+    // createAsync failed (session busy, permissions revoked, etc.)
+    // Back off 300ms and retry
+    _recording = null;
+    if (rec) {
+      try { await rec.stopAndUnloadAsync(); } catch {}
     }
+    if (_isCapturing) {
+      _cycleTimer = setTimeout(() => runCycle(), 300);
+    }
+  }
+}
+
+// ─── Watchdog ─────────────────────────────────────────────────────────
+// Checks every 3 seconds that a cycle started within the last 2.5s.
+// If the loop silently died, it force-restarts it.
+
+function startWatchdog(): void {
+  stopWatchdog();
+  _watchdogTimer = setInterval(() => {
+    if (!_isCapturing) return;
+    const age = Date.now() - _lastCycleAt;
+    if (age > 2500) {
+      // Loop appears dead — force restart
+      if (_cycleTimer) { clearTimeout(_cycleTimer); _cycleTimer = null; }
+      if (_recording) {
+        _recording.stopAndUnloadAsync().catch(() => {});
+        _recording = null;
+      }
+      runCycle();
+    }
+  }, 3000);
+}
+
+function stopWatchdog(): void {
+  if (_watchdogTimer) {
+    clearInterval(_watchdogTimer);
+    _watchdogTimer = null;
   }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────
 
 /**
- * Initialize microphone permissions and audio session.
- * Call this once on app mount (AlertProvider).
+ * Initialize microphone permissions and lock the audio session into
+ * recording mode. Call once on app mount. Returns true if granted.
  */
 export async function initAudioCapture(): Promise<boolean> {
   try {
-    await Audio.setAudioModeAsync(AUDIO_MODE);
+    await Audio.setAudioModeAsync(RECORDING_MODE);
     const { granted } = await Audio.requestPermissionsAsync();
     return granted;
   } catch {
@@ -177,9 +174,8 @@ export async function initAudioCapture(): Promise<boolean> {
 }
 
 /**
- * Start continuous microphone capture.
- * Each 1-second chunk fires the callback with a ClassificationResult
- * if the audio energy exceeds the sensitivity-adjusted threshold.
+ * Start continuous mic capture. Fires callback for every chunk that
+ * exceeds the sensitivity-adjusted dB threshold.
  */
 export function startAudioCapture(
   callback: AudioCaptureCallback,
@@ -189,33 +185,28 @@ export function startAudioCapture(
   _isCapturing = true;
   _callback = callback;
   _sensitivity = sensitivity;
-  runCaptureCycle();
+  runCycle();
+  startWatchdog();
 }
 
 /**
- * Stop microphone capture immediately.
+ * Stop mic capture fully. Cleans up all timers and the active recording.
  */
 export async function stopAudioCapture(): Promise<void> {
   _isCapturing = false;
   _callback = null;
+  stopWatchdog();
 
-  if (_captureLoop) {
-    clearTimeout(_captureLoop);
-    _captureLoop = null;
-  }
+  if (_cycleTimer) { clearTimeout(_cycleTimer); _cycleTimer = null; }
 
   if (_recording) {
-    try {
-      await _recording.stopAndUnloadAsync();
-    } catch {
-      // Already stopped
-    }
+    try { await _recording.stopAndUnloadAsync(); } catch {}
     _recording = null;
   }
 }
 
 /**
- * Update sensitivity while capture is running.
+ * Update sensitivity live while capture is running.
  */
 export function setCaptureSensitivity(sensitivity: number): void {
   _sensitivity = sensitivity;
@@ -225,44 +216,10 @@ export function isCapturing(): boolean {
   return _isCapturing;
 }
 
-/**
- * Suspend capture so the audio session can be handed to a sound player.
- * Stops the current recording and clears the loop — does NOT set
- * _isCapturing to false, so resumeAfterPlayback() can restart cleanly.
- */
-export async function suspendCaptureForPlayback(): Promise<void> {
-  if (_captureLoop) {
-    clearTimeout(_captureLoop);
-    _captureLoop = null;
-  }
-  if (_recording) {
-    try {
-      await _recording.stopAndUnloadAsync();
-    } catch {
-      // Already unloaded
-    }
-    _recording = null;
-  }
-}
+// ─── Stubs kept for import compatibility ─────────────────────────────
+// These were used by TingAlert for audio session handoff.
+// Now that TingAlert plays no sound, these are no-ops.
 
-/**
- * Resume capture after a sound has finished playing.
- * Re-asserts recording audio mode and restarts the cycle.
- */
-export function resumeCaptureAfterPlayback(): void {
-  if (!_isCapturing) return; // was stopped entirely — don't restart
-  // Small delay to let the audio session fully release
-  setTimeout(() => runCaptureCycle(), 300);
-}
-
-/**
- * Restore the recording audio mode without restarting the capture cycle.
- * Useful to call before resumeCaptureAfterPlayback.
- */
-export async function restoreRecordingAudioMode(): Promise<void> {
-  try {
-    await Audio.setAudioModeAsync(AUDIO_MODE);
-  } catch {
-    // ignore
-  }
-}
+export async function suspendCaptureForPlayback(): Promise<void> {}
+export function resumeCaptureAfterPlayback(): void {}
+export async function restoreRecordingAudioMode(): Promise<void> {}
