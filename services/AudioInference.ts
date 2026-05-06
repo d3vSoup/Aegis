@@ -43,17 +43,25 @@ type InferenceCallback = (result: ClassificationResult) => void;
 
 let isRunning = false;
 const lastAlertTime: Partial<Record<AlertEventType, number>> = {};
+let _globalLastAlertTime = 0;
+const GLOBAL_COOLDOWN_MS = 5000; // Min time between ANY alerts (all types)
 
 // ─── Debounce ────────────────────────────────────────────────────────
 
 function isDebounced(type: AlertEventType): boolean {
+  const now = Date.now();
+  // Global cooldown — no alert of ANY type within 5s of the last one
+  if (now - _globalLastAlertTime < GLOBAL_COOLDOWN_MS) return true;
+  // Per-type debounce — same type can't repeat within ALERT_DEBOUNCE_MS
   const last = lastAlertTime[type];
   if (!last) return false;
-  return Date.now() - last < ALERT_DEBOUNCE_MS;
+  return now - last < ALERT_DEBOUNCE_MS;
 }
 
 function markAlertFired(type: AlertEventType): void {
-  lastAlertTime[type] = Date.now();
+  const now = Date.now();
+  lastAlertTime[type] = now;
+  _globalLastAlertTime = now;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────

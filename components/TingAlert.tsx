@@ -81,36 +81,58 @@ export function TingAlert({ visible, alert, onDismiss }: TingAlertProps) {
   // ── Play Alert Sound via expo-av ──────────────────────────────────
   async function playAlertSound() {
     try {
-      // Configure audio session to duck/override other audio and play at max
+      // ⚠️  The AudioCapture service holds the session in recording mode
+      // (allowsRecordingIOS: true). We must temporarily hand off the session
+      // to playback mode so the speaker fires, then restore recording mode.
       await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
+        allowsRecordingIOS: false,       // Release mic lock → speaker unlocks
+        playsInSilentModeIOS: true,      // Override silent switch
         staysActiveInBackground: false,
         shouldDuckAndroid: false,
+        interruptionModeIOS: 1,
+        interruptionModeAndroid: 1,
+        playThroughEarpieceAndroid: false,
       });
 
-      // Load and play the bundled "ting" alert sound
       const { sound } = await Audio.Sound.createAsync(
-        // ⬇ Place a high-impact WAV or MP3 in /assets/sounds/ting.wav
-        // The file MUST exist. Use the bundler's require() for static assets.
         require('../assets/sounds/ting.wav'),
         {
           shouldPlay: true,
-          volume: 1.0,     // Absolute maximum
+          volume: 1.0,
           isMuted: false,
         },
       );
       soundRef.current = sound;
 
-      // Auto-unload after playback to prevent memory leaks
       sound.setOnPlaybackStatusUpdate((status) => {
         if ('didJustFinish' in status && status.didJustFinish) {
           sound.unloadAsync().catch(() => {});
           soundRef.current = null;
+
+          // Restore recording mode so AudioCapture can resume mic input
+          Audio.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+            staysActiveInBackground: true,
+            shouldDuckAndroid: false,
+            interruptionModeIOS: 1,
+            interruptionModeAndroid: 1,
+            playThroughEarpieceAndroid: false,
+          }).catch(() => {});
         }
       });
     } catch (e) {
-      // Sound file may not be wired yet — fail silently, haptics still fire
       console.warn('[TingAlert] Sound playback failed:', e);
+      // Always restore recording mode even on failure
+      Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: false,
+        interruptionModeIOS: 1,
+        interruptionModeAndroid: 1,
+        playThroughEarpieceAndroid: false,
+      }).catch(() => {});
     }
   }
 
