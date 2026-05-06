@@ -205,13 +205,18 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
 
   // ── Request notification + mic permissions + load safe zones on mount ──
   useEffect(() => {
-    setupNotifications();
-    requestLocationPermission();
-    // Request microphone permission and init audio session immediately
+    // Notifications — best-effort only; they're partially broken in Expo Go SDK54
+    setupNotifications().catch(() => {});
+
+    // Location — must be guarded; Expo Go Info.plist may not have NSLocation keys
+    requestLocationPermission().catch(() => {});
+
+    // Microphone permission + audio session — the core pipeline
     initInference();
+
     loadSafeZones().then((zones) => {
       dispatch({ type: 'SET_SAFE_ZONES', payload: zones });
-    });
+    }).catch(() => {});
   }, []);
 
   // ── Hydrate from AsyncStorage on mount ────────────────────────────
@@ -288,14 +293,15 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
 
   const triggerAlert = useCallback((event: AlertEvent) => {
     dispatch({ type: 'TRIGGER_ALERT', payload: event });
-    // Fire system notification (appears over any running app)
-    fireAlertNotification(event);
-    // Fire the strongest haptic burst first
+    // Notification: best-effort, swallow all errors — it doesn't work in Expo Go
+    // SDK54 removed push notification support; haptics+visual is the full pipeline.
+    fireAlertNotification(event).catch(() => {});
+    // Haptic burst
     playAlertBurst();
     if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
     dismissTimerRef.current = setTimeout(() => {
       dispatch({ type: 'DISMISS_ALERT' });
-      dismissAlertNotifications();
+      dismissAlertNotifications().catch(() => {});
     }, 10000);
   }, []);
 

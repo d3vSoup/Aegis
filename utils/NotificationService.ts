@@ -75,24 +75,21 @@ export async function fireAlertNotification(event: AlertEvent): Promise<void> {
   const icon = ALERT_ICONS[event.type] ?? '⚠️';
 
   try {
-    const content: Notifications.NotificationContentInput = {
-      title: `${icon} AEGIS ALERT — ${event.label.toUpperCase()}`,
-      body: `${event.decibels} dB detected${event.proximity ? ` · ${event.proximity}` : ''}`,
-      data: { alertId: event.id, type: event.type },
-      sound: true, // Must be boolean or string — never null/undefined (iOS nil crash)
-    };
-
-    if (Platform.OS === 'android') {
-      content.priority = Notifications.AndroidNotificationPriority.MAX;
-    }
-
     await Notifications.scheduleNotificationAsync({
-      content,
-      trigger: null, // fire immediately
+      content: {
+        title: `${icon} AEGIS — ${event.label.toUpperCase()}`,
+        body: `${event.decibels} dB detected${event.proximity ? ` · ${event.proximity}` : ''}`,
+        data: { alertId: event.id, type: event.type },
+        sound: true,  // Must be boolean or string — never undefined (iOS nil crash)
+        ...(Platform.OS === 'android' && {
+          priority: Notifications.AndroidNotificationPriority.MAX,
+        }),
+      },
+      trigger: null,
     });
-  } catch (err) {
-    // Gracefully degrade — notification failure should not break haptics
-    console.warn('[Aegis] Notification failed:', err);
+  } catch {
+    // Swallow silently — notifications are broken in Expo Go SDK54+
+    // The real alert pipeline is haptics + TingAlert visual overlay.
   }
 }
 
